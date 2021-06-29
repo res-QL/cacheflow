@@ -1,1 +1,1 @@
-{"food":{"firstCall":1624995800309,"allCalls":[null],"numberOfCalls":1,"averageCallSpan":"Insufficient Data"}}
+{"food":{"firstCall":1625002446552,"allCalls":[1625002446552,1625002450139,1625002452102,1625002453271,1625002456174],"numberOfCalls":5,"averageCallSpan":9622,"uncachedCallTime":194,"cachedCallTime":0}}

@@ -74,7 +74,7 @@ const resolvers = {
       //make sure that info is the param name
       return cache({ location: 'local' }, info, () => {
         let x = 0;
-        while (x < 10) {
+        while (x < 1000) {
           console.log(x++);
         }
 
@@ -84,7 +84,7 @@ const resolvers = {
     food(parent, args, ctx, info) {
       return cache({ location: 'local' }, info, () => {
         let x = 0;
-        while (x < 10) {
+        while (x < 1000) {
           console.log(x++);
         }
 

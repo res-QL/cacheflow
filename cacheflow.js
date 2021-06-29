@@ -79,23 +79,25 @@ exports.cache = function (cacheConfig = {}, info, callback) {
       //if same resolver was found in cache
       if (parsedData[info.path.key]) {
         console.log('Data found in cache');
-        metrics(info);
-        console.log('Request latency: ', Date.now() - startDate, 'ms');
 
+        const requestLatencyCached = Date.now() - startDate;
+        console.log('Request latency: ', Date.now() - startDate, 'ms');
+        metrics({ cachedLatency: requestLatencyCached }, info);
         return parsedData[info.path.key];
       } else {
         //if resolver is not found in cache
         const returnData = callback(); //run callback
         console.log('Data not found in cache, caching now.');
-        metrics(info);
+
         parsedData[info.path.key] = returnData; //Append new data to cache
 
         //Update cache with new data
         fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
           if (err) throw new Error(err);
         });
-        const requestLatency = Date.now() - startDate;
-        console.log('Request latency: ', requestLatency, 'ms');
+        const requestLatencyUncached = Date.now() - startDate;
+        metrics({ uncachedLatency: requestLatencyUncached }, info);
+        console.log('Request latency: ', requestLatencyUncached, 'ms');
         console.log(returnData);
         //return new data
         return returnData;
@@ -109,48 +111,61 @@ exports.cache = function (cacheConfig = {}, info, callback) {
   }
 };
 
-function metrics(info) {
+function metrics(resolverData, info) {
+  console.log(resolverData);
+
   //have to make sure the info gets passed in
   //Reads from metrics json file
   const cachedMetrics = fs.readFileSync('./localMetricsStorage.json', 'utf8');
   const parsedMetrics = JSON.parse(cachedMetrics);
 
   if (parsedMetrics[info.path.key]) {
-    const { numberOfCalls, allCalls, averageCallSpan } =
-      parsedMetrics[info.path.key];
-    console.log('number of calls', numberOfCalls);
+    //Current time of request
+    const date = Date.now();
 
-    // INCREASE HITCOUNT BY ONE
-    parsedMetrics[info.path.key].numberOfCalls++;
+    //MAKES AN ARRAY OF MAX LENGTH TEN WITH TIMESTAMPS OF REQUESTS
+    let allCalls = parsedMetrics[info.path.key].allCalls;
+    allCalls.push(date);
+    allCalls.length > 10 ? allCalls.shift() : allCalls;
 
-    // TAKE TIMESTAMP OF CURRENT HIT, TAKE DIFFERENCE FROM HIT
-    //BEFORE AND CALCULATE NEW AVG
-    // THIS WILL CHECK IF THRESHOLD IS HIT
+    //CHECKS HOW HOT THE RESOLVER IS (TIME IT TOOK FOR THE LAST TEN CALLS)
+    //WE COULD ALSO MAKE THE SIZE UP TO 100 AND THEN FOR THE PAST TEN JUST
+    //PLUG IN ALLCALLS.LENGTH-10
+    parsedMetrics[info.path.key].averageCallSpan = date - allCalls[0];
 
-    const curTime = Date.now();
-    parsedMetrics[info.path.key].allCalls.push(curTime);
-
-    // const dateWindow = curTime - firstCall; //total time elapsed
-    const timeSinceLastCall = curtime - parsedMetrics[info.path.key].lastCall;
-
-    // parsedMetrics[info.path.key].averageCallSpan *
-
-    // timesCalled++/TotalTimesElapse
+    //INCREASE NUMBER OF CALLS BY ONE
+    parsedMetrics[info.path.key].numberOfCalls += 1;
 
     // MAX AGE OF THE REQUEST
+    const maxAge = date - parsedMetrics[info.path.key].firstcall;
 
-    //LOCATION OF CACHED DATA (LOCAL/REDIS)
-    //LENGTH OF REQUEST UNCACHED
-    //LENGTH OF REQUEST CACHED
+    //UPDATE CACHED LATENCY
+    parsedMetrics[info.path.key].cachedCallTime = resolverData.cachedLatency;
+
+    //LOCATION OF CACHED DATA (LOCAL/REDIS) right now all the data is saved locally
+
+    //LENGTH OF REQUEST UNCACHED maybe pass this down from the cache fxn itself?
+    //LENGTH OF REQUEST CACHED maybe pass this down from the cache fxn itself?
+
     //SIZE OF DATA
-  } else {
-    //TO DO IF NOT IN METRICS
 
+    fs.writeFile(
+      'localMetricsStorage.json',
+      JSON.stringify(parsedMetrics),
+      (err) => {
+        if (err) {
+          throw new Error(err);
+        }
+      }
+    );
+  } else {
     parsedMetrics[info.path.key] = {
       firstCall: Date.now(),
-      allCalls: [this.firstCall], //we can update this will a timestamp from every call
+      allCalls: [Date.now()], //we can update this will a timestamp from every call
       numberOfCalls: 1,
       averageCallSpan: 'Insufficient Data',
+      uncachedCallTime: resolverData.uncachedLatency,
+      cachedCallTime: null,
     };
 
     fs.writeFile(
