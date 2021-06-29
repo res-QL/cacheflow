@@ -1,9 +1,10 @@
 {
-  "name": "Production_Project",
+  "name": "cacheflow-testing",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
+    "start": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -11,6 +12,8 @@
   "license": "ISC",
   "dependencies": {
     "apollo-server": "^2.25.2",
-    "graphql": "^15.5.1"
+    "graphql": "^15.5.1",
+    "nodemon": "^2.0.7",
+    "redis": "^3.1.2"
   }
 }
