@@ -59,8 +59,6 @@ exports.initCache = function (configObj) {
   }
 };
 
-const track = {}; //this will keep track of how many times data is requested
-
 exports.cache = function (cacheConfig = {}, info, callback) {
   //intital time stamp of request
   const startDate = Date.now();
