@@ -1,5 +1,11 @@
-const { ApolloServer, gql } = require("apollo-server");
-const { cache } = require("./cacheflow.js");
+const { ApolloServer, gql } = require('apollo-server');
+const { cache, initCache } = require('./cacheflow.js');
+
+initCache({
+  local: {
+    name: 'localstorage',
+  },
+});
 
 // A schema is a collection of type definitions (hence "typeDefs")
 // that together define the "shape" of queries that are executed against
@@ -13,30 +19,50 @@ const typeDefs = gql`
     favoriteFood: String
   }
 
+  type Food {
+    name: String
+  }
+
   # The "Query" type is special: it lists all of the available queries that
   # clients can execute, along with the return type for each. In this
   # case, the "books" query returns an array of zero or more Books (defined above).
   type Query {
     users: [User]
+    food: [Food]
   }
 `;
 
 const users = [
   {
-    name: "Walker",
-    favoriteFood: "Kate Chopin",
+    name: 'Walker',
+    favoriteFood: 'Kate Chopin',
   },
   {
-    name: "Tyler",
-    favoriteFood: "pizza",
+    name: 'Tyler',
+    favoriteFood: 'pizza',
   },
   {
-    name: "Ian",
-    favoriteFood: "cat food",
+    name: 'Ian',
+    favoriteFood: 'cat food',
   },
   {
-    name: "Eddie",
-    favoriteFood: "eggs",
+    name: 'Eddie',
+    favoriteFood: 'eggs',
+  },
+];
+
+const food = [
+  {
+    name: 'Apple',
+  },
+  {
+    name: 'Pizza',
+  },
+  {
+    name: 'Orange',
+  },
+  {
+    name: 'Pasta',
   },
 ];
 
@@ -46,12 +72,23 @@ const resolvers = {
   Query: {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
-      return cache({ resolverName: info.path.key }, () => {
+      return cache({ location: 'local' }, info, () => {
         let x = 0;
         while (x < 10) {
-          console.log(x);
-          x++;
+          console.log(x++);
         }
+
+        return users;
+      });
+    },
+    food(parent, args, ctx, info) {
+      return cache({ location: 'local' }, info, () => {
+        let x = 0;
+        while (x < 10) {
+          console.log(x++);
+        }
+
+        return food;
       });
     },
   },
