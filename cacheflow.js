@@ -1,28 +1,52 @@
 const fs = require('fs');
 const redis = require('redis');
+const { promisify } = require('util');
 
 exports.testMsg = function () {
   console.log('This is a test message from cacheflow');
 };
 
+let client;
+
 exports.initCache = function (configObj) {
   //if user wants to cache they must initialize the cache locations by using these.
   fs.writeFileSync('localMetricsStorage.json', '{}');
+
   if (configObj.local) {
+    setInterval(() => {
+      clean();
+    }, configObj.local.checkExpire * 1000);
+
+    function clean() {
+      console.log('Cleaning');
+      const curData = fs.readFileSync('localStorage.json', 'utf8');
+      let parsedData = JSON.parse(curData);
+      const dateNow = Date.now();
+      console.log('date now:', dateNow);
+
+      console.log(parsedData);
+      for (let resolver in parsedData) {
+        console.log('resolver.expire', parsedData[resolver]);
+        if (dateNow > parsedData[resolver].expire) {
+          console.log('deleting');
+          delete parsedData[resolver];
+        }
+      }
+
+      fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
+        if (err) throw new Error(err);
+      });
+    }
     /*
     VALID LOCAL STORAGE CONFIG:
     {
       local: {
-        name: NAME
+        checkExpire: TIME TILL EACH CHECK CYCLE
       }
     }
     */
     //check if config is valid
-    if (
-      configObj.local.name === undefined &&
-      typeof configObj.local.name !== 'string'
-    )
-      throw new Error('Local storage configuration is invalid.');
+
     //fs filesync stuff
     fs.writeFileSync(`localStorage.json`, '{}');
   }
@@ -38,16 +62,16 @@ exports.initCache = function (configObj) {
     }
     */
     //check if config is valid: contains redis ip, port, password, etc.
-    if (
-      configObj.redis.host === undefined ||
-      configObj.redis.port === undefined ||
-      configObj.redis.password === undefined
-    ) {
-      throw new Error('Redis storage configuration is invalid.');
-    }
+    // if (
+    //   configObj.redis.host === undefined ||
+    //   configObj.redis.port === undefined ||
+    //   configObj.redis.password === undefined
+    // ) {
+    //   throw new Error('Redis storage configuration is invalid.');
+    // }
     //redis server connect
 
-    const client = redis.createClient({
+    client = redis.createClient({
       host: configObj.redis.host,
       port: configObj.redis.port,
       password: configObj.redis.password,
@@ -59,7 +83,8 @@ exports.initCache = function (configObj) {
   }
 };
 
-exports.cache = function (cacheConfig = {}, info, callback) {
+//STILL NEED TO SET UP A CONDITIONAL TO DEAL WITH MUTATIONS
+exports.cache = async function (cacheConfig = {}, info, callback) {
   //intital time stamp of request
   const startDate = Date.now();
 
@@ -73,39 +98,78 @@ exports.cache = function (cacheConfig = {}, info, callback) {
     const cachedData = fs.readFileSync('./localStorage.json', 'utf8');
     const parsedData = JSON.parse(cachedData);
 
-    return (() => {
-      //if same resolver was found in cache
-      if (parsedData[info.path.key]) {
-        console.log('Data found in cache');
+    //if same resolver was found in cache
+    if (parsedData[info.path.key]) {
+      console.log('Data found in cache');
+      const currentTime = Date.now();
 
-        const requestLatencyCached = Date.now() - startDate;
-        console.log('Request latency: ', Date.now() - startDate, 'ms');
-        metrics({ cachedLatency: requestLatencyCached }, info);
-        return parsedData[info.path.key];
-      } else {
-        //if resolver is not found in cache
-        const returnData = callback(); //run callback
-        console.log('Data not found in cache, caching now.');
+      const requestLatencyCached = currentTime - startDate;
+      console.log('Request latency: ', currentTime - startDate, 'ms');
+      parsedData[info.path.key].expire =
+        currentTime + cacheConfig.maxAge * 1000;
+      metrics({ cachedLatency: requestLatencyCached }, info);
+    } else {
+      //if resolver is not found in cache
+      const returnData = callback(); //run callback
+      const currentTime = Date.now();
+      console.log('Data not found in cache, caching now.');
 
-        parsedData[info.path.key] = returnData; //Append new data to cache
-
-        //Update cache with new data
-        fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
-          if (err) throw new Error(err);
-        });
-        const requestLatencyUncached = Date.now() - startDate;
-        metrics({ uncachedLatency: requestLatencyUncached }, info);
-        console.log('Request latency: ', requestLatencyUncached, 'ms');
-        console.log(returnData);
-        //return new data
-        return returnData;
-      }
-    })();
+      parsedData[info.path.key] = {
+        data: returnData,
+        expire: currentTime + cacheConfig.maxAge * 1000,
+      }; //Append new data to cache
+      console.log('parsedData', parsedData);
+      const requestLatencyUncached = currentTime - startDate;
+      metrics(
+        {
+          uncachedLatency: requestLatencyUncached,
+          returnData,
+          storedLocation: 'local',
+        },
+        info
+      );
+      console.log('Request latency: ', requestLatencyUncached, 'ms');
+    }
+    fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
+      if (err) throw new Error(err);
+    });
+    return parsedData[info.path.key].data;
   }
 
   //if user specified redis as storage location:
   if (cacheConfig.location === 'redis') {
-    console.log('stored on redis');
+    let redisData;
+    let responseTime;
+    const getAsync = promisify(client.get).bind(client);
+
+    await getAsync(info.path.key).then((res) => {
+      if (res === null) {
+        console.log('Data not found in redis, caching now.');
+        const returnData = callback();
+        client.set(info.path.key, JSON.stringify(returnData));
+        client.expire(info.path.key, cacheConfig.maxAge);
+        redisData = returnData;
+        responseTime = Date.now() - startDate;
+        metrics(
+          {
+            uncachedLatency: responseTime,
+            storedLocation: 'redis',
+            returnData,
+          },
+          info
+        );
+      } else {
+        console.log('Data found in redis.');
+        redisData = JSON.parse(res);
+        client.expire(info.path.key, cacheConfig.maxAge);
+        responseTime = Date.now() - startDate;
+        metrics({ cachedLatency: responseTime }, info);
+      }
+    });
+
+    console.log('Request latency: ', responseTime, 'ms');
+    console.log(redisData);
+    return redisData;
   }
 };
 
@@ -126,8 +190,6 @@ function metrics(resolverData, info) {
     allCalls.push(date);
     allCalls.length > 10 ? allCalls.shift() : allCalls;
 
-    //CHECKS HOW HOT THE RESOLVER IS (TIME IT TOOK FOR THE LAST TEN CALLS)
-    //WE COULD ALSO MAKE THE SIZE UP TO 100 AND THEN FOR THE PAST TEN JUST
     //PLUG IN ALLCALLS.LENGTH-10
     parsedMetrics[info.path.key].averageCallSpan = date - allCalls[0];
 
@@ -137,15 +199,7 @@ function metrics(resolverData, info) {
     // MAX AGE OF THE REQUEST
     const maxAge = date - parsedMetrics[info.path.key].firstcall;
 
-    //UPDATE CACHED LATENCY
     parsedMetrics[info.path.key].cachedCallTime = resolverData.cachedLatency;
-
-    //LOCATION OF CACHED DATA (LOCAL/REDIS) right now all the data is saved locally
-
-    //LENGTH OF REQUEST UNCACHED maybe pass this down from the cache fxn itself?
-    //LENGTH OF REQUEST CACHED maybe pass this down from the cache fxn itself?
-
-    //SIZE OF DATA
 
     fs.writeFile(
       'localMetricsStorage.json',
@@ -158,12 +212,14 @@ function metrics(resolverData, info) {
     );
   } else {
     parsedMetrics[info.path.key] = {
-      firstCall: Date.now(),
-      allCalls: [Date.now()], //we can update this will a timestamp from every call
-      numberOfCalls: 1,
-      averageCallSpan: 'Insufficient Data',
-      uncachedCallTime: resolverData.uncachedLatency,
-      cachedCallTime: null,
+      firstCall: Date.now(), //timestamp from first call
+      allCalls: [Date.now()], //array of timestamps from calls
+      numberOfCalls: 1, // total number of calls for resolver
+      averageCallSpan: 'Insufficient Data', //avg time between calls
+      uncachedCallTime: resolverData.uncachedLatency, //time to respond with unqueried data
+      cachedCallTime: null, //time to respond with queried data
+      dataSize: sizeOf(resolverData.returnData),
+      storedLocation: resolverData.storedLocation,
     };
 
     fs.writeFile(
@@ -175,3 +231,20 @@ function metrics(resolverData, info) {
     );
   }
 }
+
+//Function to determine size of obj
+const typeSizes = {
+  undefined: () => 0,
+  boolean: () => 4,
+  number: () => 8,
+  string: (item) => 2 * item.length,
+  object: (item) =>
+    !item
+      ? 0
+      : Object.keys(item).reduce(
+          (total, key) => sizeOf(key) + sizeOf(item[key]) + total,
+          0
+        ),
+};
+
+const sizeOf = (value) => typeSizes[typeof value](value);
