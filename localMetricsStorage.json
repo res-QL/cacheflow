@@ -1,1 +1,1 @@
-{}
+{"users":{"firstCall":1625095086368,"allCalls":[1625095086368,1625095087278],"numberOfCalls":2,"averageCallSpan":910,"uncachedCallTime":226,"cachedCallTime":1,"dataSize":230,"storedLocation":"local"},"food":{"firstCall":1625095089832,"allCalls":[1625095089832],"numberOfCalls":1,"averageCallSpan":"Insufficient Data","uncachedCallTime":209,"cachedCallTime":null,"dataSize":82,"storedLocation":"redis"}}

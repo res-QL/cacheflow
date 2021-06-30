@@ -11,6 +11,15 @@ let client;
 exports.initCache = function (configObj) {
   //if user wants to cache they must initialize the cache locations by using these.
   fs.writeFileSync('localMetricsStorage.json', '{}');
+  fs.writeFileSync(
+    'globalMetrics.json',
+    JSON.stringify({
+      totalNumberOfRequests: 0,
+      totalTimeSaved: 0,
+      sizeOfDataRedis: 0,
+      sizeOfDataLocal: 0,
+    })
+  );
 
   if (configObj.local) {
     setInterval(() => {
@@ -230,6 +239,32 @@ function metrics(resolverData, info) {
       }
     );
   }
+
+  //------------------------- GLOBAL METRICS ----------------------------------
+
+  const globalMetrics = fs.readFileSync('globalMetrics.json', 'utf8');
+  let globalMetricsParsed = JSON.parse(globalMetrics);
+
+  //TOTAL NUMBER OF REQUESTS
+  globalMetricsParsed.totalNumberOfRequests++;
+
+  //TOTAL AMOUNT OF TIME SAVED BY CACHING
+  globalMetricsParsed.totalTimeSaved +=
+    parsedMetrics[info.path.key].uncachedCallTime -
+    parsedMetrics[info.path.key].cachedCallTime;
+
+  // SIZE/AMOUNT OF DATA SAVED ON REDIS AND LOCAL
+  resolverData.storedLocation === 'local'
+    ? (globalMetricsParsed.sizeOfDataLocal += sizeOf(resolverData.returnData))
+    : (globalMetricsParsed.sizeOfDataRedis += sizeOf(resolverData.returnData));
+
+  fs.writeFile(
+    'globalMetrics.json',
+    JSON.stringify(globalMetricsParsed),
+    (err) => {
+      if (err) throw new Error(err);
+    }
+  );
 }
 
 //Function to determine size of obj
