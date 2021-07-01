@@ -34,6 +34,11 @@ const typeDefs = gql`
     users: [User]
     food: [Food]
   }
+  type Mutation {
+    addUser(name: String!, favoriteFood: String): [User]
+    deleteUser(name: String!): User!
+    updateUser(name: String!): User!
+  }
 `;
 
 const users = [
@@ -77,10 +82,10 @@ const resolvers = {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
       return cache({ location: 'local', maxAge: 10 }, info, () => {
-        let x = 0;
-        while (x < 1000) {
-          console.log(x++);
-        }
+        // let x = 0;
+        // while (x < 1000) {
+        //   console.log(x++);
+        // }
 
         return users;
       });
@@ -91,10 +96,25 @@ const resolvers = {
         while (x < 1000) {
           console.log(x++);
         }
-
         return food;
       });
     },
+  },
+  Mutation: {
+    addUser(parent, args, ctx, info) {
+      return cache(
+        { location: 'local', maxAge: 10, mutate: 'users' },
+        info,
+        () => {
+          console.log(info);
+          users.push({ name: args.name, favoriteFood: args.favoriteFood });
+          console.log(users);
+          return users;
+        }
+      );
+    },
+    deleteUser(parent, args, ctx, info) {},
+    updateUser(parent, args, ctx, info) {},
   },
 };
 

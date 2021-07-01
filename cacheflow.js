@@ -21,6 +21,7 @@ exports.initCache = function (configObj) {
     })
   );
 
+  //If user specified to intialize local storage
   if (configObj.local) {
     setInterval(() => {
       clean();
@@ -30,54 +31,58 @@ exports.initCache = function (configObj) {
       console.log('Cleaning');
       const curData = fs.readFileSync('localStorage.json', 'utf8');
       let parsedData = JSON.parse(curData);
+
+      const curGlobalData = fs.readFileSync('globalMetrics.json', 'utf8');
+      let parsedGlobalData = JSON.parse(curGlobalData);
+
+      const curLocalData = fs.readFileSync('localMetricsStorage.json', 'utf8');
+      let parsedLocalData = JSON.parse(curLocalData);
+
       const dateNow = Date.now();
       console.log('date now:', dateNow);
+
+      let sizeOfDeletedDataRedis;
+      let sizeOfDeletedDataLocal;
 
       console.log(parsedData);
       for (let resolver in parsedData) {
         console.log('resolver.expire', parsedData[resolver]);
         if (dateNow > parsedData[resolver].expire) {
           console.log('deleting');
+          parsedData[resolver.storedLocation] === 'local'
+            ? (sizeOfDeletedDataLocal += parsedData[resolver.dataSize])
+            : (sizeOfDeletedDataRedis += parsedData[resolver.dataSize]);
           delete parsedData[resolver];
+          delete parsedLocalData[resolver];
         }
       }
+
+      parsedGlobalData.sizeOfDataRedis -= sizeOfDeletedDataRedis;
+      parsedGlobalData.sizeOfDataLocal -= sizeOfDeletedDataLocal;
 
       fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
         if (err) throw new Error(err);
       });
+
+      fs.writeFile('globalMetrics.json', JSON.stringify(parsedData), (err) => {
+        if (err) throw new Error(err);
+      });
+
+      fs.writeFile(
+        'localMetricsStorage.json',
+        JSON.stringify(parsedData),
+        (err) => {
+          if (err) throw new Error(err);
+        }
+      );
     }
-    /*
-    VALID LOCAL STORAGE CONFIG:
-    {
-      local: {
-        checkExpire: TIME TILL EACH CHECK CYCLE
-      }
-    }
-    */
-    //check if config is valid
 
     //fs filesync stuff
     fs.writeFileSync(`localStorage.json`, '{}');
   }
+
+  //If user specified to intialize redis storage
   if (configObj.redis) {
-    /*
-    VALID REDIS STORAGE CONFIG:
-    {
-      redis: {
-        host: HOSTNAME,
-        port: PORT,
-        password: PASSWORD
-      }
-    }
-    */
-    //check if config is valid: contains redis ip, port, password, etc.
-    // if (
-    //   configObj.redis.host === undefined ||
-    //   configObj.redis.port === undefined ||
-    //   configObj.redis.password === undefined
-    // ) {
-    //   throw new Error('Redis storage configuration is invalid.');
-    // }
     //redis server connect
 
     client = redis.createClient({
@@ -108,41 +113,67 @@ exports.cache = async function (cacheConfig = {}, info, callback) {
     const parsedData = JSON.parse(cachedData);
 
     //if same resolver was found in cache
-    if (parsedData[info.path.key]) {
-      console.log('Data found in cache');
-      const currentTime = Date.now();
+    if (parsedData[info.path.key] || parsedData[cacheConfig.mutate]) {
+      if (cacheConfig.mutate) {
+        const returnData = await callback();
+        const currentTime = Date.now();
+        parsedData[cacheConfig.mutate] = {
+          data: returnData,
+          expire: currentTime + cacheConfig.maxAge * 1000,
+        };
+      } else {
+        console.log('Data found in cache');
+        const currentTime = Date.now();
 
-      const requestLatencyCached = currentTime - startDate;
-      console.log('Request latency: ', currentTime - startDate, 'ms');
-      parsedData[info.path.key].expire =
-        currentTime + cacheConfig.maxAge * 1000;
-      metrics({ cachedLatency: requestLatencyCached }, info);
+        const requestLatencyCached = currentTime - startDate;
+        console.log('Request latency: ', currentTime - startDate, 'ms');
+        parsedData[info.path.key].expire =
+          currentTime + cacheConfig.maxAge * 1000;
+        metrics({ cachedLatency: requestLatencyCached }, info);
+      }
     } else {
       //if resolver is not found in cache
-      const returnData = callback(); //run callback
-      const currentTime = Date.now();
       console.log('Data not found in cache, caching now.');
 
-      parsedData[info.path.key] = {
-        data: returnData,
-        expire: currentTime + cacheConfig.maxAge * 1000,
-      }; //Append new data to cache
-      console.log('parsedData', parsedData);
-      const requestLatencyUncached = currentTime - startDate;
-      metrics(
-        {
-          uncachedLatency: requestLatencyUncached,
-          returnData,
-          storedLocation: 'local',
-        },
-        info
-      );
-      console.log('Request latency: ', requestLatencyUncached, 'ms');
+      const returnData = await callback(); //run callback
+      const currentTime = Date.now();
+
+      if (cacheConfig.mutate) {
+        parsedData[cacheConfig.mutate] = {
+          data: returnData,
+          expire: currentTime + cacheConfig.maxAge * 1000,
+        };
+        metrics(
+          {
+            returnData,
+            storedLocation: 'local',
+          },
+          info
+        );
+      } else {
+        parsedData[info.path.key] = {
+          data: returnData,
+          expire: currentTime + cacheConfig.maxAge * 1000,
+        }; //Append new data to cache
+        console.log('parsedData', parsedData);
+        const requestLatencyUncached = currentTime - startDate;
+        metrics(
+          {
+            uncachedLatency: requestLatencyUncached,
+            returnData,
+            storedLocation: 'local',
+          },
+          info
+        );
+        console.log('Request latency: ', requestLatencyUncached, 'ms');
+      }
     }
     fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
       if (err) throw new Error(err);
     });
-    return parsedData[info.path.key].data;
+    return cacheConfig.mutate
+      ? parsedData[cacheConfig.mutate].data
+      : parsedData[info.path.key].data;
   }
 
   //if user specified redis as storage location:
@@ -151,10 +182,10 @@ exports.cache = async function (cacheConfig = {}, info, callback) {
     let responseTime;
     const getAsync = promisify(client.get).bind(client);
 
-    await getAsync(info.path.key).then((res) => {
+    await getAsync(info.path.key).then(async (res) => {
       if (res === null) {
         console.log('Data not found in redis, caching now.');
-        const returnData = callback();
+        const returnData = await callback();
         client.set(info.path.key, JSON.stringify(returnData));
         client.expire(info.path.key, cacheConfig.maxAge);
         redisData = returnData;
@@ -265,6 +296,18 @@ function metrics(resolverData, info) {
       if (err) throw new Error(err);
     }
   );
+}
+
+function mutationMetrics(resolverData, info) {
+  const globalData = fs.readFileSync('/globalMetrics.json', 'utf-8');
+  const GBDjson = JSON.parse(globalData);
+
+  //need to know how big the data was before, subtract that from the global then add the new
+
+  // resolverData.storedLocation == 'local'? GBDjson.sizeOfDataLocal = : GBDjson.sizeOfDataRedis =
+
+  const localData = fs.readFileSync('/localMetricsStorage.json', 'utf-8');
+  const LDjson = JSON.parse(localData);
 }
 
 //Function to determine size of obj
