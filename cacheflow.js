@@ -8,231 +8,480 @@ exports.testMsg = function () {
 
 let client;
 
+/*
+----------------------------------------------------------------------------
+INITIALIZE CACHE FUNCTION: initCache(){}
+
+if user wants to cache they must initialize the cache locations by using these.
+
+Create base files: localMetricsStorage.json and globalMetrics.json
+If user specified to intialize local storage, localStorage.json is created
+If user specified to intialize redis storage, client is created and connected
+Data cleaning interval is initialized
+
+*/
+
 exports.initCache = function (configObj) {
-  //if user wants to cache they must initialize the cache locations by using these.
   fs.writeFileSync('localMetricsStorage.json', '{}');
+  fs.writeFileSync(
+    'globalMetrics.json',
+    JSON.stringify({
+      totalNumberOfRequests: 0,
+      totalTimeSaved: 0,
+      sizeOfDataRedis: 0,
+      sizeOfDataLocal: 0,
+    })
+  );
 
   if (configObj.local) {
-    setInterval(() => {
-      clean();
-    }, configObj.local.checkExpire * 1000);
-
-    function clean() {
-      console.log('Cleaning');
-      const curData = fs.readFileSync('localStorage.json', 'utf8');
-      let parsedData = JSON.parse(curData);
-      const dateNow = Date.now();
-      console.log('date now:', dateNow);
-
-      console.log(parsedData);
-      for (let resolver in parsedData) {
-        console.log('resolver.expire', parsedData[resolver]);
-        if (dateNow > parsedData[resolver].expire) {
-          console.log('deleting');
-          delete parsedData[resolver];
-        }
-      }
-
-      fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
-        if (err) throw new Error(err);
-      });
-    }
-    /*
-    VALID LOCAL STORAGE CONFIG:
-    {
-      local: {
-        checkExpire: TIME TILL EACH CHECK CYCLE
-      }
-    }
-    */
-    //check if config is valid
-
-    //fs filesync stuff
     fs.writeFileSync(`localStorage.json`, '{}');
   }
-  if (configObj.redis) {
-    /*
-    VALID REDIS STORAGE CONFIG:
-    {
-      redis: {
-        host: HOSTNAME,
-        port: PORT,
-        password: PASSWORD
-      }
-    }
-    */
-    //check if config is valid: contains redis ip, port, password, etc.
-    // if (
-    //   configObj.redis.host === undefined ||
-    //   configObj.redis.port === undefined ||
-    //   configObj.redis.password === undefined
-    // ) {
-    //   throw new Error('Redis storage configuration is invalid.');
-    // }
-    //redis server connect
 
+  if (configObj.redis) {
     client = redis.createClient({
       host: configObj.redis.host,
       port: configObj.redis.port,
       password: configObj.redis.password,
     });
-
-    client.on('error', (err) => {
-      throw new Error(err);
-    });
   }
+
+  setInterval(() => {
+    clean();
+  }, configObj.local.checkExpire * 1000);
+
+  client.on('error', (err) => {
+    throw new Error(err);
+  });
 };
 
-//STILL NEED TO SET UP A CONDITIONAL TO DEAL WITH MUTATIONS
-exports.cache = async function (cacheConfig = {}, info, callback) {
-  //intital time stamp of request
-  const startDate = Date.now();
+/*
+-------------------------------------------------------------
+CACHE FUNCTION: cache(cachedConfig: Object that is passed in by user, info, callback){
 
-  //Checks to make sure cacheConfig is valid
+}
+
+Check to see it cacheConfig is valid
+If cacheConfig.location is local call cachLocal
+If cacheConfig.location is redis call cacheRedis
+
+*/
+
+exports.cache = async function (cacheConfig = {}, info, callback) {
+  const startDate = Date.now();
   if (typeof cacheConfig !== 'object' || Array.isArray(cacheConfig))
     throw new Error('Config object is invalid');
 
-  //if user specified local as storage location:
   if (cacheConfig.location === 'local') {
-    //Read local storage file and look for same resolver
-    const cachedData = fs.readFileSync('./localStorage.json', 'utf8');
-    const parsedData = JSON.parse(cachedData);
-
-    //if same resolver was found in cache
-    if (parsedData[info.path.key]) {
-      console.log('Data found in cache');
-      const currentTime = Date.now();
-
-      const requestLatencyCached = currentTime - startDate;
-      console.log('Request latency: ', currentTime - startDate, 'ms');
-      parsedData[info.path.key].expire =
-        currentTime + cacheConfig.maxAge * 1000;
-      metrics({ cachedLatency: requestLatencyCached }, info);
-    } else {
-      //if resolver is not found in cache
-      const returnData = callback(); //run callback
-      const currentTime = Date.now();
-      console.log('Data not found in cache, caching now.');
-
-      parsedData[info.path.key] = {
-        data: returnData,
-        expire: currentTime + cacheConfig.maxAge * 1000,
-      }; //Append new data to cache
-      console.log('parsedData', parsedData);
-      const requestLatencyUncached = currentTime - startDate;
-      metrics(
-        {
-          uncachedLatency: requestLatencyUncached,
-          returnData,
-          storedLocation: 'local',
-        },
-        info
-      );
-      console.log('Request latency: ', requestLatencyUncached, 'ms');
-    }
-    fs.writeFile('localStorage.json', JSON.stringify(parsedData), (err) => {
-      if (err) throw new Error(err);
-    });
-    return parsedData[info.path.key].data;
+    return cacheLocal(cacheConfig, info, callback, startDate);
   }
 
-  //if user specified redis as storage location:
   if (cacheConfig.location === 'redis') {
-    let redisData;
-    let responseTime;
-    const getAsync = promisify(client.get).bind(client);
-
-    await getAsync(info.path.key).then((res) => {
-      if (res === null) {
-        console.log('Data not found in redis, caching now.');
-        const returnData = callback();
-        client.set(info.path.key, JSON.stringify(returnData));
-        client.expire(info.path.key, cacheConfig.maxAge);
-        redisData = returnData;
-        responseTime = Date.now() - startDate;
-        metrics(
-          {
-            uncachedLatency: responseTime,
-            storedLocation: 'redis',
-            returnData,
-          },
-          info
-        );
-      } else {
-        console.log('Data found in redis.');
-        redisData = JSON.parse(res);
-        client.expire(info.path.key, cacheConfig.maxAge);
-        responseTime = Date.now() - startDate;
-        metrics({ cachedLatency: responseTime }, info);
-      }
-    });
-
-    console.log('Request latency: ', responseTime, 'ms');
-    console.log(redisData);
-    return redisData;
+    return cacheRedis(cacheConfig, info, callback, startDate);
   }
 };
 
-function metrics(resolverData, info) {
-  console.log(resolverData);
+/*
+-------------------------------------------------------------
+LOCAL CACHE FUNCTION: cacheLocal() {
+  
+}
+IF RESOLVER WAS A MUTATION CALL mutateLocal
 
-  //have to make sure the info gets passed in
-  //Reads from metrics json file
-  const cachedMetrics = fs.readFileSync('./localMetricsStorage.json', 'utf8');
-  const parsedMetrics = JSON.parse(cachedMetrics);
+IF RESOLVER FOUND IN CACHE CALL localFound
 
-  if (parsedMetrics[info.path.key]) {
-    //Current time of request
-    const date = Date.now();
+IF RESOLVER NOT FOUND IN CACHE CALL localNotFound
 
-    //MAKES AN ARRAY OF MAX LENGTH TEN WITH TIMESTAMPS OF REQUESTS
-    let allCalls = parsedMetrics[info.path.key].allCalls;
-    allCalls.push(date);
-    allCalls.length > 10 ? allCalls.shift() : allCalls;
 
-    //PLUG IN ALLCALLS.LENGTH-10
-    parsedMetrics[info.path.key].averageCallSpan = date - allCalls[0];
+*/
 
-    //INCREASE NUMBER OF CALLS BY ONE
-    parsedMetrics[info.path.key].numberOfCalls += 1;
+async function cacheLocal(cacheConfig, info, callback, startDate) {
+  if (cacheConfig.mutate) {
+    return mutateLocal(cacheConfig, callback);
+  }
 
-    // MAX AGE OF THE REQUEST
-    const maxAge = date - parsedMetrics[info.path.key].firstcall;
+  const parsedData = fsRead('./localStorage.json');
 
-    parsedMetrics[info.path.key].cachedCallTime = resolverData.cachedLatency;
-
-    fs.writeFile(
-      'localMetricsStorage.json',
-      JSON.stringify(parsedMetrics),
-      (err) => {
-        if (err) {
-          throw new Error(err);
-        }
-      }
-    );
+  if (parsedData[info.path.key]) {
+    return localFound(cacheConfig, info, startDate, parsedData);
   } else {
-    parsedMetrics[info.path.key] = {
-      firstCall: Date.now(), //timestamp from first call
-      allCalls: [Date.now()], //array of timestamps from calls
-      numberOfCalls: 1, // total number of calls for resolver
-      averageCallSpan: 'Insufficient Data', //avg time between calls
-      uncachedCallTime: resolverData.uncachedLatency, //time to respond with unqueried data
-      cachedCallTime: null, //time to respond with queried data
-      dataSize: sizeOf(resolverData.returnData),
-      storedLocation: resolverData.storedLocation,
-    };
-
-    fs.writeFile(
-      'localMetricsStorage.json',
-      JSON.stringify(parsedMetrics),
-      (err) => {
-        if (err) throw new Error(err);
-      }
-    );
+    return localNotFound(cacheConfig, info, callback, startDate, parsedData);
   }
 }
 
-//Function to determine size of obj
+/*
+-------------------------------------------------------------
+MUTATE LOCAL FUNCTION: mutateLocal() {}
+
+READ LOCALSTORAGE JSON FILE
+RE-RUN THE CALLBACK FOR NEW MUTATED DATA
+UPDATE THE LOCALSTORAGE JSON FILE
+RUN MUTATIONMETRICS FUNCTION
+RETURN NEW MUTATED DATA
+
+*/
+
+async function mutateLocal(cacheConfig, callback) {
+  const parsedData = fsRead('localStorage.json');
+  const dataBack = await callback();
+
+  parsedData[cacheConfig.mutate] = {
+    data: dataBack,
+    expire: Date.now() + cacheConfig.maxAge * 1000,
+  };
+
+  fsWrite('localStorage.json', parsedData);
+  mutationMetrics(cacheConfig.mutate, dataBack);
+
+  return parsedData[cacheConfig.mutate].data;
+}
+
+/*
+-------------------------------------------------------------
+LOCAL FOUND FUNCTION: localFound() {}
+
+Read and parse localStorage.json
+Time stamp and log latency
+Update expiration date
+Log metrics
+Update cache and return cached data
+
+*/
+
+function localFound(cacheConfig, info, startDate, parsedData) {
+  const currentTime = Date.now();
+  const requestLatencyCached = currentTime - startDate;
+
+  parsedData[info.path.key].expire = currentTime + cacheConfig.maxAge * 1000;
+
+  metrics({ cachedLatency: requestLatencyCached }, info);
+
+  fsWrite('localStorage.json', parsedData);
+  return parsedData[info.path.key].data;
+}
+
+/*
+-------------------------------------------------------------
+LOCAL NOT FOUND FUNCTION: localNotFound() {}
+
+Run callback to generate data
+Time stamp
+Add new data to parsed object
+Log metrics
+Cache new data and return new data
+
+*/
+
+async function localNotFound(
+  cacheConfig,
+  info,
+  callback,
+  startDate,
+  parsedData
+) {
+  const returnData = await callback();
+  const currentTime = Date.now();
+
+  parsedData[info.path.key] = {
+    data: returnData,
+    expire: currentTime + cacheConfig.maxAge * 1000,
+  };
+
+  const requestLatencyUncached = currentTime - startDate;
+  metrics(
+    {
+      uncachedLatency: requestLatencyUncached,
+      returnData,
+      storedLocation: 'local',
+    },
+    info
+  );
+
+  fsWrite('localStorage.json', parsedData);
+  return parsedData[info.path.key].data;
+}
+
+/*
+-------------------------------------------------------------
+MUTATE REDIS FUNCTION: redisMutate() {}
+
+New mutated data must be generated
+Set new mutated data to redis store with new expiration date
+Log mutation metrics
+Return new mutated data
+
+*/
+
+async function redisMutate(cacheConfig, callback, startDate) {
+  const returnData = await callback();
+  client.set(cacheConfig.mutate, JSON.stringify(returnData));
+  client.expire(cacheConfig.mutate, cacheConfig.maxAge);
+  mutationMetrics(cacheConfig.mutate, returnData);
+  return returnData;
+}
+
+/*
+-------------------------------------------------------------
+CACHE REDIS FUNCTION: cacheRedis() {}
+
+Must promisify redis client.get function
+If user is mutating data, run reisMutate function
+Else 
+
+*/
+
+async function cacheRedis(cacheConfig, info, callback, startDate) {
+  const getAsync = promisify(client.get).bind(client);
+  const resolverName = info.path.key;
+  let redisData;
+  let responseTime;
+
+  if (cacheConfig.mutate) {
+    return redisMutate(cacheConfig, callback, startDate);
+  }
+
+  await getAsync(resolverName).then(async (res) => {
+    if (res === null) {
+      const returnData = await callback();
+      client.set(resolverName, JSON.stringify(returnData));
+      client.expire(resolverName, cacheConfig.maxAge);
+      redisData = returnData;
+      responseTime = Date.now() - startDate;
+      metrics(
+        {
+          uncachedLatency: responseTime,
+          storedLocation: 'redis',
+          returnData,
+        },
+        info
+      );
+    } else {
+      redisData = JSON.parse(res);
+      client.expire(resolverName, cacheConfig.maxAge);
+      responseTime = Date.now() - startDate;
+      metrics({ cachedLatency: responseTime }, info);
+    }
+  });
+
+  return redisData;
+}
+
+/*
+-------------------------------------------------------------
+MUTATE METRICS FUNCTION: mutationMetrics() {
+  
+}
+
+UPDATE SIZE OF DATA STORED IN LOCAL AFTER A MUTATION
+
+UPDATE SIZE OF DATA STORED IN GLOBAL AFTER A MUTATION
+
+
+*/
+
+function mutationMetrics(mutateName, data) {
+  const jsonLocal = fsRead('localMetricsStorage.json');
+  const jsonGlobal = fsRead('globalMetrics.json');
+
+  const oldSize = jsonLocal[mutateName].dataSize;
+  const newSize = sizeOf(data);
+
+  jsonLocal[mutateName].dataSize = newSize;
+
+  jsonGlobal.sizeOfDataLocal += newSize - oldSize;
+
+  fsWrite('localMetricsStorage.json', jsonLocal);
+  fsWrite('globalMetrics.json', jsonGlobal);
+}
+
+/*
+-------------------------------------------------------------
+METRICS FUNCTION: metrics() {
+  
+}
+
+If resolver in cache call localMetricsUpdate
+If resolver not in cache call setLocalMetric
+Always call globalMetrics
+
+*/
+
+function metrics(resolverData, info) {
+  let parsedMetrics = fsRead('localMetricsStorage.json');
+
+  if (parsedMetrics[info.path.key]) {
+    localMetricsUpdate(resolverData, info, parsedMetrics);
+  } else {
+    setLocalMetric(resolverData, info, parsedMetrics);
+  }
+  globalMetrics(resolverData, info, parsedMetrics);
+}
+
+/*
+-------------------------------------------------------------
+SET LOCAL METRICS FUNCTION: setLocalMetric() {
+  
+}
+Update localMetricsStorage with new resolver 
+
+
+firstCall: timestamp from first call
+allCalls: array of timestamps from calls
+numberOfCalls: total number of calls for resolver
+averageCallSpan: average time between calls
+uncachedCallTime: length of uncached query 
+cachedCallTime: length of cached query
+dataSize: size of data
+storedLocation: where the data is stored
+
+*/
+
+function setLocalMetric(resolverData, info, parsedMetrics) {
+  parsedMetrics[info.path.key] = {
+    firstCall: Date.now(),
+    allCalls: [Date.now()],
+    numberOfCalls: 1,
+    averageCallSpan: 'Insufficient Data',
+    uncachedCallTime: resolverData.uncachedLatency,
+    cachedCallTime: null,
+    dataSize: sizeOf(resolverData.returnData),
+    storedLocation: resolverData.storedLocation,
+  };
+
+  fsWrite('localMetricsStorage.json', parsedMetrics);
+}
+
+/*
+-------------------------------------------------------------
+LOCAL METRICS UPDATE FUNCTION: cacheRedis() {
+  
+}
+Updates allCalls to be array with only last ten calls to resolver
+Updates averageCallSpan to be length of time between last call and tenth call ago
+Increments numberOfCalls by one
+Sets cached call time equal to how long the cached request took
+
+
+*/
+
+function localMetricsUpdate(resolverData, info, parsedMetrics) {
+  const resolverName = info.path.key;
+  const date = Date.now();
+
+  let allCalls = parsedMetrics[resolverName].allCalls;
+  allCalls.push(date);
+  allCalls.length > 10 ? allCalls.shift() : allCalls;
+
+  parsedMetrics[resolverName].averageCallSpan = date - allCalls[0];
+  parsedMetrics[resolverName].numberOfCalls += 1;
+  parsedMetrics[resolverName].cachedCallTime = resolverData.cachedLatency;
+
+  fsWrite('localMetricsStorage.json', parsedMetrics);
+
+  return;
+}
+
+/*
+-------------------------------------------------------------
+GLOBAL METRICS FUNCTION: globalMetrics() {
+  
+}
+Increments totalNumberOfRequests by one
+Increments totalTimeSaved by the difference between the cached and uncached requests for that resolver
+Updates amount of data saved locally
+*/
+
+function globalMetrics(resolverData, info, parsedMetrics) {
+  const resolverName = info.path.key;
+
+  let globalMetricsParsed = fsRead('globalMetrics.json');
+
+  globalMetricsParsed.totalNumberOfRequests++;
+
+  globalMetricsParsed.totalTimeSaved +=
+    parsedMetrics[resolverName].uncachedCallTime -
+    parsedMetrics[resolverName].cachedCallTime;
+
+  resolverData.storedLocation === 'local'
+    ? (globalMetricsParsed.sizeOfDataLocal += sizeOf(resolverData.returnData))
+    : null;
+
+  fsWrite('globalMetrics.json', globalMetricsParsed);
+
+  return;
+}
+
+/*
+-------------------------------------------------------------
+CLEAN STORAGE FUNCTION: clean() {
+  
+}
+Checks if any data stored locally is set to expire, deletes it from localStorage if its expire property is greater than Date.now()
+Updates local metrics for that resolver and global metrics
+*/
+
+function clean() {
+  console.log('Cleaning');
+  const dateNow = Date.now();
+
+  let parsedData = fsRead('localStorage.json');
+  let parsedGlobalData = fsRead('globalMetrics.json');
+  let parsedLocalData = fsRead('localMetricsStorage.json');
+
+  let sizeOfDeletedDataLocal = 0;
+
+  for (let resolver in parsedData) {
+    if (dateNow > parsedData[resolver].expire) {
+      console.log('deleting');
+      sizeOfDeletedDataLocal += parsedLocalData[resolver].dataSize;
+      parsedLocalData[resolver].dataSize = 0;
+      delete parsedData[resolver];
+    }
+  }
+
+  client.info((req, res) => {
+    res.split('\n').map((line) => {
+      if (line.match(/used_memory:/)) {
+        parsedGlobalData.sizeOfDataRedis = parseInt(line.split(':')[1]);
+        parsedGlobalData.sizeOfDataLocal -= sizeOfDeletedDataLocal;
+
+        fsWrite('globalMetrics.json', parsedGlobalData);
+      }
+    });
+  });
+
+  fsWrite('localStorage.json', parsedData);
+  fsWrite('localMetricsStorage.json', parsedLocalData);
+}
+
+/*
+-------------------------------------------------------------
+FS FUNCTIONS: 
+fsRead(){}
+fsWrite(){}
+
+*/
+
+function fsRead(fileName) {
+  const data = fs.readFileSync(`${fileName}`, 'utf-8');
+  return JSON.parse(data);
+}
+
+function fsWrite(fileName, data) {
+  fs.writeFile(`${fileName}`, JSON.stringify(data), (err) => {
+    if (err) throw new Error(err);
+  });
+}
+
+/*
+-------------------------------------------------------------
+DATA SIZE FUNCTION: sizeOf() {
+  
+}
+Returns an estimated size of input data in bytes
+
+
+*/
+
 const typeSizes = {
   undefined: () => 0,
   boolean: () => 4,
