@@ -3,7 +3,7 @@ const { cache, initCache } = require('./cacheflow.js');
 
 initCache({
   local: {
-    checkExpire: 30,
+    checkExpire: 10,
   },
   redis: {
     host: '127.0.0.1',
@@ -81,11 +81,11 @@ const resolvers = {
   Query: {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
-      return cache({ location: 'local', maxAge: 10 }, info, () => {
-        // let x = 0;
-        // while (x < 1000) {
-        //   console.log(x++);
-        // }
+      return cache({ location: 'redis', maxAge: 60 }, info, () => {
+        let x = 0;
+        while (x < 1000) {
+          console.log(x++);
+        }
 
         return users;
       });
@@ -103,7 +103,7 @@ const resolvers = {
   Mutation: {
     addUser(parent, args, ctx, info) {
       return cache(
-        { location: 'local', maxAge: 10, mutate: 'users' },
+        { location: 'redis', maxAge: 10, mutate: 'users' },
         info,
         () => {
           console.log(info);
