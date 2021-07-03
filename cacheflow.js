@@ -7,6 +7,7 @@ exports.testMsg = function () {
 };
 
 let client;
+let globalLocalThreshold; // = 10
 
 /*
 ----------------------------------------------------------------------------
@@ -35,6 +36,7 @@ exports.initCache = function (configObj) {
 
   if (configObj.local) {
     fs.writeFileSync(`localStorage.json`, '{}');
+    globalLocalThreshold = configObj.local.globalThreshold / 1000;
   }
 
   if (configObj.redis) {
@@ -98,9 +100,7 @@ async function cacheLocal(cacheConfig, info, callback, startDate) {
   if (cacheConfig.mutate) {
     return mutateLocal(cacheConfig, callback);
   }
-
-  const parsedData = fsRead('./localStorage.json');
-
+  const parsedData = fsRead('localStorage.json');
   if (parsedData[info.path.key]) {
     return localFound(cacheConfig, info, startDate, parsedData);
   } else {
@@ -178,15 +178,12 @@ async function localNotFound(
   startDate,
   parsedData
 ) {
+  const resolverName = info.path.key;
   const returnData = await callback();
   const currentTime = Date.now();
-
-  parsedData[info.path.key] = {
-    data: returnData,
-    expire: currentTime + cacheConfig.maxAge * 1000,
-  };
-
   const requestLatencyUncached = currentTime - startDate;
+  let threshold;
+
   metrics(
     {
       uncachedLatency: requestLatencyUncached,
@@ -195,9 +192,29 @@ async function localNotFound(
     },
     info
   );
+  cacheConfig.threshold
+    ? (threshold = cacheConfig.threshold / 1000)
+    : (threshold = globalLocalThreshold);
 
-  fsWrite('localStorage.json', parsedData);
-  return parsedData[info.path.key].data;
+  const localMetrics = fsRead('localMetricsStorage.json');
+
+  const allCalls = localMetrics[resolverName].allCalls;
+  const numberCalls = localMetrics[resolverName].numberOfCalls;
+  let frequency;
+
+  allCalls.length === 1
+    ? (frequency = 0)
+    : (frequency = numberCalls / (allCalls[allCalls.length - 1] - allCalls[0]));
+
+  if (frequency >= threshold) {
+    parsedData[resolverName] = {
+      data: returnData,
+      expire: currentTime + cacheConfig.maxAge * 1000,
+    };
+    fsWrite('localStorage.json', parsedData);
+    return parsedData[resolverName].data;
+  }
+  return returnData;
 }
 
 /*
@@ -305,15 +322,15 @@ Always call globalMetrics
 
 */
 
-function metrics(resolverData, info) {
+async function metrics(resolverData, info) {
   let parsedMetrics = fsRead('localMetricsStorage.json');
 
   if (parsedMetrics[info.path.key]) {
-    localMetricsUpdate(resolverData, info, parsedMetrics);
+    await localMetricsUpdate(resolverData, info, parsedMetrics);
   } else {
-    setLocalMetric(resolverData, info, parsedMetrics);
+    await setLocalMetric(resolverData, info, parsedMetrics);
   }
-  globalMetrics(resolverData, info, parsedMetrics);
+  await globalMetrics(resolverData, info, parsedMetrics);
 }
 
 /*
@@ -346,7 +363,6 @@ function setLocalMetric(resolverData, info, parsedMetrics) {
     dataSize: sizeOf(resolverData.returnData),
     storedLocation: resolverData.storedLocation,
   };
-
   fsWrite('localMetricsStorage.json', parsedMetrics);
 }
 
@@ -406,8 +422,6 @@ function globalMetrics(resolverData, info, parsedMetrics) {
     : null;
 
   fsWrite('globalMetrics.json', globalMetricsParsed);
-
-  return;
 }
 
 /*
@@ -420,7 +434,6 @@ Updates local metrics for that resolver and global metrics
 */
 
 function clean() {
-  console.log('Cleaning');
   const dateNow = Date.now();
 
   let parsedData = fsRead('localStorage.json');
@@ -431,7 +444,6 @@ function clean() {
 
   for (let resolver in parsedData) {
     if (dateNow > parsedData[resolver].expire) {
-      console.log('deleting');
       sizeOfDeletedDataLocal += parsedLocalData[resolver].dataSize;
       parsedLocalData[resolver].dataSize = 0;
       delete parsedData[resolver];
@@ -463,11 +475,13 @@ fsWrite(){}
 
 function fsRead(fileName) {
   const data = fs.readFileSync(`${fileName}`, 'utf-8');
-  return JSON.parse(data);
+  const json = JSON.parse(data);
+  //console.log('json in fsRead', json);
+  return json;
 }
 
 function fsWrite(fileName, data) {
-  fs.writeFile(`${fileName}`, JSON.stringify(data), (err) => {
+  fs.writeFileSync(`${fileName}`, JSON.stringify(data), (err) => {
     if (err) throw new Error(err);
   });
 }
@@ -478,8 +492,6 @@ DATA SIZE FUNCTION: sizeOf() {
   
 }
 Returns an estimated size of input data in bytes
-
-
 */
 
 const typeSizes = {
@@ -497,3 +509,10 @@ const typeSizes = {
 };
 
 const sizeOf = (value) => typeSizes[typeof value](value);
+
+//initcache: 20x/min start
+//cache(30X/min)
+
+//if request is hit certain number of times (Total times or times in a set time frame)
+//if data is larger then we want it to be cached sooner
+//

@@ -1,1 +1,1 @@
-{"food":{"firstCall":1625330042344,"allCalls":[1625330044326,1625330048110,1625330048769,1625330049007,1625330049210,1625330054179,1625330054734,1625330054921,1625330055124,1625330055800],"numberOfCalls":12,"averageCallSpan":11474,"uncachedCallTime":230,"cachedCallTime":0,"dataSize":0,"storedLocation":"local"},"users":{"firstCall":1625330045933,"allCalls":[1625330045933,1625330046548,1625330057043,1625330057856,1625330058273],"numberOfCalls":5,"averageCallSpan":12340,"uncachedCallTime":199,"cachedCallTime":0,"dataSize":0,"storedLocation":"local"}}
+{}
