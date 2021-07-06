@@ -280,7 +280,7 @@ const smartCache = (metricsData, resolverName) => {
     metricsData[resolverName].numberOfCalls -
     globalMetrics.averageNumberOfCalls;
   numberCalls < 0 ? (numberCalls = 0) : null;
-  numberCalls = numberCalls / 100;
+  numberCalls = numberCalls / 100; //difference gets divided by 100
 
   const callSpan =
     metricsData[resolverName].averageCallSpan -

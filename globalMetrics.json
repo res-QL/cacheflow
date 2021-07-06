@@ -1,16 +1,1 @@
-{
-  "totalNumberOfRequests": 1,
-  "averageNumberOfCalls": 1,
-  "numberOfUncachedRequests": 1,
-  "numberOfCachedRequests": 0,
-  "totalTimeSaved": 0,
-  "averageUncachedLatency": 0,
-  "averageCachedLatency": 0,
-  "totalUncachedElapsed": 0,
-  "totalCachedElapsed": 0,
-  "globalAverageCallSpan": 0,
-  "uniqueResolvers": 1,
-  "sizeOfDataRedis": 692688,
-  "sizeOfDataLocal": 230,
-  "averageSizeOfDataLocal": 230
-}
+{"totalNumberOfRequests":0,"averageNumberOfCalls":0,"numberOfUncachedRequests":0,"numberOfCachedRequests":0,"totalTimeSaved":0,"averageUncachedLatency":0,"averageCachedLatency":0,"totalUncachedElapsed":0,"totalCachedElapsed":0,"globalAverageCallSpan":0,"uniqueResolvers":0,"sizeOfDataRedis":692688,"sizeOfDataLocal":0,"averageSizeOfDataLocal":0}
