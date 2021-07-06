@@ -82,25 +82,21 @@ const resolvers = {
   Query: {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
-      return cache(
-        { location: 'local', maxAge: 60, threshold: 20 },
-        info,
-        () => {
-          // let x = 0;
-          // while (x < 1000) {
-          //   console.log(x++);
-          // }
-
-          return users;
-        }
-      );
-    },
-    food(parent, args, ctx, info) {
-      return cache({ location: 'local', maxAge: 10 }, info, () => {
+      return cache({ location: 'local', maxAge: 60 }, info, () => {
         // let x = 0;
         // while (x < 1000) {
         //   console.log(x++);
         // }
+
+        return users;
+      });
+    },
+    food(parent, args, ctx, info) {
+      return cache({ location: 'local', maxAge: 10 }, info, () => {
+        let x = 0;
+        while (x < 1000) {
+          console.log(x++);
+        }
         return food;
       });
     },
