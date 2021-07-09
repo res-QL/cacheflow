@@ -45,6 +45,7 @@ exports.initCache = function (configObj) {
       sizeOfDataRedis: 0,
       sizeOfDataLocal: 0,
       averageSizeOfDataLocal: 0,
+      averageCacheThreshold: 0,
     })
   );
 
@@ -59,15 +60,15 @@ exports.initCache = function (configObj) {
       port: configObj.redis.port,
       password: configObj.redis.password,
     });
+
+    client.on('error', (err) => {
+      throw new Error(err);
+    });
   }
 
   setInterval(() => {
     clean();
   }, configObj.local.checkExpire * 1000);
-
-  client.on('error', (err) => {
-    throw new Error(err);
-  });
 };
 
 /*
@@ -207,6 +208,7 @@ async function localNotFound(
   const returnData = await callback();
   const currentTime = Date.now();
   const requestLatencyUncached = currentTime - startDate;
+
   let threshold;
 
   metrics(
@@ -217,11 +219,14 @@ async function localNotFound(
     },
     info
   );
+
   cacheConfig.threshold
     ? (threshold = cacheConfig.threshold / 1000)
     : (threshold = globalLocalThreshold);
 
   const localMetrics = fsRead('localMetricsStorage.json');
+  const globalMetrics = fsRead('globalMetrics.json');
+  globalMetrics.numberOfCachedRequests++;
 
   const allCalls = localMetrics[resolverName].allCalls;
   const numberCalls = localMetrics[resolverName].numberOfCalls;
@@ -231,23 +236,29 @@ async function localNotFound(
     ? (frequency = 0)
     : (frequency = numberCalls / (allCalls[allCalls.length - 1] - allCalls[0]));
 
-  if (
-    frequency >= threshold ||
-    (cacheConfig.smartCache && smartCache(localMetrics, resolverName))
-  ) {
-    // if the threshold is met or smart cache returns true
+  let smartCacheValue = smartCache(localMetrics, globalMetrics, resolverName);
+
+  if (frequency >= threshold || smartCacheValue) {
+    // if the threshold is met or smartCache returns true
     parsedData[resolverName] = {
       data: returnData,
       expire: currentTime + cacheConfig.maxAge * 1000,
     };
-    const globalMetrics = fsRead('globalMetrics.json');
-    globalMetrics.numberOfCachedRequests++;
-    fsWrite('globalMetrics.json', globalMetrics);
 
+    !smartCacheValue ? fsWrite('globalMetrics.json', globalMetrics) : null;
     fsWrite('localStorage.json', parsedData);
 
     return parsedData[resolverName].data;
   } else {
+    metrics(
+      {
+        uncachedLatency: requestLatencyUncached,
+        returnData,
+        storedLocation: 'local',
+      },
+      info
+    );
+
     const globalMetrics = fsRead('globalMetrics.json');
     globalMetrics.numberOfUncachedRequests++;
     globalMetrics.totalUncachedElapsed += requestLatencyUncached;
@@ -262,40 +273,58 @@ async function localNotFound(
 
 /*
 WE HAVE TO KEEP TRACK OF MAX AGE AS WELL
-  set a window (avg+10%avg )
-  avg(100ms) new request(110ms) should we leave it
-  if we do this the average will continue to go up, causing the next request to be slower etc.
 
-  1. how hot the server is (avg call span is very low LOTS OF REQUESTS IN SHORT TIME) -> cache sooner
-  2. more requests -> cache sooner
-  3. comparison to avg
-  4. size of data -> cache sooner
  
 */
-const smartCache = (metricsData, resolverName) => {
-  const globalMetrics = fsRead('/globalMetrics.json');
-  const OUR_THRESHOLD = 1.0; //dummy value for now
+const smartCache = (metricsData, globalMetrics, resolverName) => {
+  //maybe keep a threshold value for each resolver and a global avg threshold that we use to see if data should be cached
+  const defaultThreshold = 1; //I have no idea what this should be yet
+  let THRESHOLD;
+  globalMetrics.averageCacheThreshold === 0
+    ? (THRESHOLD = defaultThreshold)
+    : (THRESHOLD = globalMetrics.averageCacheThreshold);
 
-  const numberCalls =
+  let numberCalls =
     metricsData[resolverName].numberOfCalls -
     globalMetrics.averageNumberOfCalls;
   numberCalls < 0 ? (numberCalls = 0) : null;
-  numberCalls = numberCalls / 100; //difference gets divided by 100
+  numberCalls = numberCalls / 100;
 
-  const callSpan =
-    metricsData[resolverName].averageCallSpan -
-    globalMetrics.globalAverageCallSpan;
+  let temp;
+
+  metricsData[resolverName].averageCallSpan === 'Insufficient Data'
+    ? (temp = 10000)
+    : (temp = metricsData[resolverName].averageCallSpan);
+
+  let callSpan = temp - globalMetrics.globalAverageCallSpan;
   callSpan < 0 ? (callSpan = 0) : null;
 
-  const dataSize =
-    metricsdData[resolverName].dataSize - globalMetrics.averageSizeOfDataLocal;
+  let dataSize =
+    (metricsData[resolverName].dataSize -
+      globalMetrics.averageSizeOfDataLocal) /
+    300;
   dataSize < 0 ? (dataSize = 0) : null;
 
-  const value = numberCalls * 0.3 + callSpan * 0.5 + dataSize * 0.2;
+  const value = numberCalls * 0.3 + 1 / (callSpan * 0.001) + dataSize * 0.2;
+  console.log(
+    `numberCalls: ${numberCalls}, callSpan: ${callSpan}, dataSize: ${dataSize}`
+  );
 
-  if (value > OUR_THRESHOLD) {
+  console.log(value, THRESHOLD);
+
+  if (value > THRESHOLD * 0.9) {
+    console.log('smartcache true');
+    // cant just make it THRESHOLD because then THRESHOLD would always be increasing (not sure if 0.90 is low enough)
+    metricsData[resolverName].cacheThreshold = value;
+    fsWrite('localMetricsStorage.json', metricsData);
+
+    globalMetrics.averageCacheThreshold =
+      (THRESHOLD + value) / globalMetrics.totalNumberOfRequests; //not sure if we are dividing by the right value
+    fsWrite('globalMetrics.json', globalMetrics);
+
     return true;
   }
+  console.log('smartcache false');
   return false;
 };
 
@@ -435,6 +464,7 @@ storedLocation: where the data is stored
 */
 
 function setLocalMetric(resolverData, info, parsedMetrics) {
+  console.log(resolverData);
   parsedMetrics[info.path.key] = {
     firstCall: Date.now(),
     allCalls: [Date.now()],
@@ -444,6 +474,7 @@ function setLocalMetric(resolverData, info, parsedMetrics) {
     cachedCallTime: null,
     dataSize: sizeOf(resolverData.returnData),
     storedLocation: resolverData.storedLocation,
+    cacheThreshold: null,
   };
   fsWrite('localMetricsStorage.json', parsedMetrics);
 }
@@ -468,6 +499,10 @@ function localMetricsUpdate(resolverData, info, parsedMetrics) {
   let allCalls = parsedMetrics[resolverName].allCalls;
   allCalls.push(date);
   allCalls.length > 10 ? allCalls.shift() : allCalls;
+
+  if (resolverData.uncachedLatency) {
+    parsedMetrics[resolverName].uncachedCallTime = resolverData.uncachedLatency;
+  }
 
   parsedMetrics[resolverName].averageCallSpan = date - allCalls[0];
   parsedMetrics[resolverName].numberOfCalls += 1;
@@ -508,6 +543,13 @@ function globalMetrics(resolverData, info, parsedMetrics) {
 
   globalMetricsParsed.averageSizeOfDataLocal =
     globalMetricsParsed.sizeOfDataLocal / numOfResolvers;
+
+  let globalAvgCallSpan = 0;
+  for (const item in parsedMetrics) {
+    globalAvgCallSpan += parsedMetrics[item].averageCallSpan;
+  }
+  globalMetricsParsed.globalAverageCallSpan =
+    globalAvgCallSpan / globalMetricsParsed.uniqueResolvers;
 
   fsWrite('globalMetrics.json', globalMetricsParsed);
 }
