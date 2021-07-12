@@ -28,12 +28,19 @@ const typeDefs = gql`
     name: String
   }
 
+  type Dog {
+    id: ID
+    treat: String
+    name: String
+  }
+
   # The "Query" type is special: it lists all of the available queries that
   # clients can execute, along with the return type for each. In this
   # case, the "books" query returns an array of zero or more Books (defined above).
   type Query {
     users: [User]
     food: [Food]
+    dogs: [Dog]
   }
   type Mutation {
     addUser(name: String!, favoriteFood: String): [User]
@@ -76,6 +83,29 @@ const food = [
   },
 ];
 
+const dogs = [
+  {
+    id: 1,
+    treat: 'banana',
+    name: 'alpha',
+  },
+  {
+    id: 2,
+    treat: 'legs',
+    name: 'johnny',
+  },
+  {
+    id: 3,
+    treat: 'bones',
+    name: 'elfie',
+  },
+  {
+    id: 4,
+    treat: 'goldfish',
+    name: 'goldfish',
+  },
+];
+
 // Resolvers define the technique for fetching the types defined in the
 // schema. This resolver retrieves books from the "books" array above.
 const resolvers = {
@@ -86,10 +116,10 @@ const resolvers = {
         { location: 'local', maxAge: 60, smartCache: true },
         info,
         () => {
-          let x = 0;
-          while (x < 1000) {
-            console.log(x++);
-          }
+          // let x = 0;
+          // while (x < 1000) {
+          //   console.log(x++);
+          // }
 
           return users;
         }
@@ -100,15 +130,25 @@ const resolvers = {
         { location: 'local', maxAge: 10, smartCache: true },
         info,
         () => {
-          let x = 0;
-          while (x < 1000) {
-            console.log(x++);
-          }
+          // let x = 0;
+          // while (x < 1000) {
+          //   console.log(x++);
+          // }
           return food;
         }
       );
     },
+    dogs(parent, args, ctx, info) {
+      return cache(
+        { location: 'local', maxAge: 15, smartCache: true },
+        info,
+        () => {
+          return dogs;
+        }
+      );
+    },
   },
+
   Mutation: {
     addUser(parent, args, ctx, info) {
       return cache(
