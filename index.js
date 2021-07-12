@@ -4,7 +4,7 @@ const { cache, initCache } = require('./cacheflow.js');
 initCache({
   local: {
     checkExpire: 10,
-    globalThreshold: 1,
+    globalThreshold: 100,
   },
   redis: {
     host: '127.0.0.1',
@@ -28,12 +28,19 @@ const typeDefs = gql`
     name: String
   }
 
+  type Dog {
+    id: ID
+    treat: String
+    name: String
+  }
+
   # The "Query" type is special: it lists all of the available queries that
   # clients can execute, along with the return type for each. In this
   # case, the "books" query returns an array of zero or more Books (defined above).
   type Query {
     users: [User]
     food: [Food]
+    dogs: [Dog]
   }
   type Mutation {
     addUser(name: String!, favoriteFood: String): [User]
@@ -76,35 +83,76 @@ const food = [
   },
 ];
 
+const dogs = [
+  {
+    id: 1,
+    treat: 'banana',
+    name: 'alpha',
+  },
+  {
+    id: 2,
+    treat: 'legs',
+    name: 'johnny',
+  },
+  {
+    id: 3,
+    treat: 'bones',
+    name: 'elfie',
+  },
+  {
+    id: 4,
+    treat: 'goldfish',
+    name: 'goldfish',
+  },
+];
+
 // Resolvers define the technique for fetching the types defined in the
 // schema. This resolver retrieves books from the "books" array above.
 const resolvers = {
   Query: {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
-      return cache({ location: 'local', maxAge: 60 }, info, () => {
-        // let x = 0;
-        // while (x < 1000) {
-        //   console.log(x++);
-        // }
+      return cache(
+        { location: 'local', maxAge: 60, smartCache: true },
+        info,
+        () => {
+          // let x = 0;
+          // while (x < 1000) {
+          //   console.log(x++);
+          // }
 
-        return users;
-      });
+          return users;
+        }
+      );
     },
     food(parent, args, ctx, info) {
-      return cache({ location: 'local', maxAge: 10 }, info, () => {
-        let x = 0;
-        while (x < 1000) {
-          console.log(x++);
+      return cache(
+        { location: 'local', maxAge: 10, smartCache: true },
+        info,
+        () => {
+          // let x = 0;
+          // while (x < 1000) {
+          //   console.log(x++);
+          // }
+          return food;
         }
-        return food;
-      });
+      );
+    },
+    dogs(parent, args, ctx, info) {
+      return cache(
+        { location: 'local', maxAge: 15, smartCache: true },
+        info,
+        () => {
+          return dogs;
+        }
+      );
     },
   },
+
   Mutation: {
     addUser(parent, args, ctx, info) {
       return cache(
-        { location: 'local', maxAge: 10, mutate: 'users' },
+        { location: 'redis', maxAge: 10, mutate: 'users' },
         info,
         () => {
           console.log(info);
