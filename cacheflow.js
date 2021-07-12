@@ -243,7 +243,6 @@ async function localNotFound(
     const globalMetrics = fsRead('globalMetrics.json');
     globalMetrics.numberOfCachedRequests++;
     fsWrite('globalMetrics.json', globalMetrics);
-
     fsWrite('localStorage.json', parsedData);
 
     return parsedData[resolverName].data;
