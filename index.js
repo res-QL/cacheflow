@@ -152,12 +152,10 @@ const resolvers = {
   Mutation: {
     addUser(parent, args, ctx, info) {
       return cache(
-        { location: 'redis', maxAge: 10, mutate: 'users' },
+        { location: 'local', maxAge: 10, mutate: 'users' },
         info,
         () => {
-          console.log(info);
           users.push({ name: args.name, favoriteFood: args.favoriteFood });
-          console.log(users);
           return users;
         }
       );

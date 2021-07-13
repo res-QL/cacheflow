@@ -87,11 +87,9 @@ exports.cache = async function (cacheConfig = {}, info, callback) {
   const startDate = Date.now();
   if (typeof cacheConfig !== 'object' || Array.isArray(cacheConfig))
     throw new Error('Config object is invalid');
-
   if (cacheConfig.location === 'local') {
     return cacheLocal(cacheConfig, info, callback, startDate);
   }
-
   if (cacheConfig.location === 'redis') {
     return cacheRedis(cacheConfig, info, callback, startDate);
   }
@@ -112,7 +110,11 @@ IF RESOLVER NOT FOUND IN CACHE CALL localNotFound
 */
 
 async function cacheLocal(cacheConfig, info, callback, startDate) {
+  const metrics = fsRead('localMetricsStorage.json');
   if (cacheConfig.mutate) {
+    if (!metrics[cacheConfig.mutate]) {
+      throw new Error('Data does not exist in local cache');
+    }
     return mutateLocal(cacheConfig, callback);
   }
   const parsedData = fsRead('localStorage.json');
@@ -138,15 +140,12 @@ RETURN NEW MUTATED DATA
 async function mutateLocal(cacheConfig, callback) {
   const parsedData = fsRead('localStorage.json');
   const dataBack = await callback();
-
   parsedData[cacheConfig.mutate] = {
     data: dataBack,
     expire: Date.now() + cacheConfig.maxAge * 1000,
   };
-
   fsWrite('localStorage.json', parsedData);
   mutationMetrics(cacheConfig.mutate, dataBack);
-
   return parsedData[cacheConfig.mutate].data;
 }
 
@@ -165,19 +164,14 @@ Update cache and return cached data
 function localFound(cacheConfig, info, startDate, parsedData) {
   const currentTime = Date.now();
   const requestLatencyCached = currentTime - startDate;
-
   parsedData[info.path.key].expire = currentTime + cacheConfig.maxAge * 1000;
-
   metrics({ cachedLatency: requestLatencyCached }, info);
   const globalMetrics = fsRead('globalMetrics.json');
-
   globalMetrics.numberOfCachedRequests++;
   globalMetrics.totalCachedElapsed += requestLatencyCached;
   globalMetrics.averageCachedLatency =
     globalMetrics.totalCachedElapsed / globalMetrics.numberOfCachedRequests;
-
   fsWrite('globalMetrics.json', globalMetrics);
-
   fsWrite('localStorage.json', parsedData);
   return parsedData[info.path.key].data;
 }
@@ -210,9 +204,7 @@ async function localNotFound(
   const requestLatencyUncached = currentTime - startDate;
 
   let localMetrics = fsRead('localMetricsStorage.json');
-
   let threshold;
-
   let inMetricCheck = false;
 
   if (!localMetrics[resolverName]) {
@@ -228,11 +220,9 @@ async function localNotFound(
   }
 
   localMetrics = fsRead('localMetricsStorage.json');
-
   cacheConfig.threshold
     ? (threshold = cacheConfig.threshold / 1000)
     : (threshold = globalLocalThreshold);
-
   const globalMetrics = fsRead('globalMetrics.json');
 
   const allCalls = localMetrics[resolverName].allCalls;
@@ -256,7 +246,7 @@ async function localNotFound(
     };
     globalMetrics.numberOfCachedRequests++;
 
-    !smartCacheValue ? fsWrite('globalMetrics.json', globalMetrics) : null;
+    fsWrite('globalMetrics.json', globalMetrics);
     fsWrite('localStorage.json', parsedData);
     return parsedData[resolverName].data;
   } else {
@@ -297,10 +287,9 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
   //   : (THRESHOLD = globalMetrics.averageCacheThreshold);
 
   let numberCalls =
-    metricsData[resolverName].numberOfCalls -
+    (metricsData[resolverName].numberOfCalls -
+      globalMetrics.averageNumberOfCalls) /
     globalMetrics.averageNumberOfCalls;
-  // numberCalls < 0 ? (numberCalls = 0) : null;
-  numberCalls = numberCalls / 10;
 
   console.log(
     '🚀 | file: cacheflow.js | line 363 | smartCache | globalMetrics.averageNumberOfCalls',
@@ -335,7 +324,8 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
     globalMetrics.averageSizeOfDataLocal
   );
 
-  const value = numberCalls + 1 / (temp * 0.001) + dataSize * 0.17;
+  console.log('avg call span', temp);
+  const value = numberCalls + (1 / (0.004 * temp)) * 0.92 + dataSize * 0.17;
   console.log(
     `numberCalls: ${numberCalls}, callSpan: ${callSpan}, dataSize: ${dataSize}`
   );
@@ -514,7 +504,6 @@ storedLocation: where the data is stored
 */
 
 function setLocalMetric(resolverData, info, parsedMetrics) {
-  console.log(resolverData);
   globalMetricsParsed = fsRead('globalMetrics.json');
   parsedMetrics[info.path.key] = {
     firstCall: Date.now(),
@@ -561,7 +550,8 @@ function localMetricsUpdate(resolverData, info, parsedMetrics) {
     parsedMetrics[resolverName].uncachedCallTime = resolverData.uncachedLatency;
   }
 
-  parsedMetrics[resolverName].averageCallSpan = date - allCalls[0];
+  parsedMetrics[resolverName].averageCallSpan =
+    (date - allCalls[0]) / allCalls.length;
   parsedMetrics[resolverName].numberOfCalls += 1;
   parsedMetrics[resolverName].cachedCallTime = resolverData.cachedLatency;
 
@@ -691,10 +681,3 @@ const typeSizes = {
 };
 
 const sizeOf = (value) => typeSizes[typeof value](value);
-
-//initcache: 20x/min start
-//cache(30X/min)
-
-//if request is hit certain number of times (Total times or times in a set time frame)
-//if data is larger then we want it to be cached sooner
-//
