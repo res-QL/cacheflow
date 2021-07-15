@@ -8,9 +8,11 @@ const { promisify } = require('util');
 
 exports.testMsg = function () {
   console.log('This is a test message from cacheflow');
+  return 'This is a test message from cacheflow';
 };
 
 let client;
+exports.client;
 let globalLocalThreshold; // = 10
 
 /*
@@ -26,7 +28,7 @@ Data cleaning interval is initialized
 
 */
 
-exports.initCache = function (configObj) {
+exports.initCache = async function (configObj) {
   fs.writeFileSync('localMetricsStorage.json', '{}');
   fs.writeFileSync(
     'globalMetrics.json',
@@ -55,20 +57,30 @@ exports.initCache = function (configObj) {
   }
 
   if (configObj.redis) {
-    client = redis.createClient({
+    client = createClient(configObj);
+  }
+
+  // client.on('error', (err) => {
+  //   throw new Error('ERROR CONNECTING TO REDIS');
+  // });
+
+  setInterval(() => {
+    clean();
+  }, configObj.local.checkExpire * 1000 || 10000);
+};
+
+exports.createClient = function (configObj) {
+  try {
+    let response = redis.createClient({
       host: configObj.redis.host,
       port: configObj.redis.port,
       password: configObj.redis.password,
     });
-
-    client.on('error', (err) => {
-      throw new Error(err);
-    });
+    return response;
+  } catch (err) {
+    throw new Error(err);
+    return err;
   }
-
-  setInterval(() => {
-    clean();
-  }, configObj.local.checkExpire * 1000);
 };
 
 /*
@@ -83,7 +95,7 @@ If cacheConfig.location is redis call cacheRedis
 
 */
 
-exports.cache = async function (cacheConfig = {}, info, callback) {
+exports.cache = function (cacheConfig = {}, info, callback) {
   const startDate = Date.now();
   if (typeof cacheConfig !== 'object' || Array.isArray(cacheConfig))
     throw new Error('Config object is invalid');
@@ -248,7 +260,8 @@ async function localNotFound(
 
     fsWrite('globalMetrics.json', globalMetrics);
     fsWrite('localStorage.json', parsedData);
-    return parsedData[resolverName].data;
+    // return parsedData[resolverName].data;
+    return returnData;
   } else {
     if (inMetricCheck === false) {
       metrics(
@@ -291,15 +304,15 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
       globalMetrics.averageNumberOfCalls) /
     globalMetrics.averageNumberOfCalls;
 
-  console.log(
-    '🚀 | file: cacheflow.js | line 363 | smartCache | globalMetrics.averageNumberOfCalls',
-    globalMetrics.averageNumberOfCalls
-  );
+  // console.log(
+  //   '🚀 | file: cacheflow.js | line 363 | smartCache | globalMetrics.averageNumberOfCalls',
+  //   globalMetrics.averageNumberOfCalls
+  // );
 
-  console.log(
-    '🚀 | file: cacheflow.js | line 365 | smartCache | metricsData[resolverName].numberOfCalls',
-    metricsData[resolverName].numberOfCalls
-  );
+  // console.log(
+  //   '🚀 | file: cacheflow.js | line 365 | smartCache | metricsData[resolverName].numberOfCalls',
+  //   metricsData[resolverName].numberOfCalls
+  // );
 
   // let numberCalls = metricsData[resolverName].numberOfCalls / 100;
 
@@ -324,33 +337,33 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
     globalMetrics.averageSizeOfDataLocal
   );
 
-  console.log('avg call span', temp);
+  // console.log('avg call span', temp);
   const value = numberCalls + (1 / (0.004 * temp)) * 0.92 + dataSize * 0.17;
-  console.log(
-    `numberCalls: ${numberCalls}, callSpan: ${callSpan}, dataSize: ${dataSize}`
-  );
+  // console.log(
+  //   `numberCalls: ${numberCalls}, callSpan: ${callSpan}, dataSize: ${dataSize}`
+  // );
 
   //not sure if we are dividing by the right value
 
-  console.log(
-    '🚀 | file: cacheflow.js | line 328 | smartCache | THRESHOLD',
-    defaultThreshold
-  );
+  // console.log(
+  //   '🚀 | file: cacheflow.js | line 328 | smartCache | THRESHOLD',
+  //   defaultThreshold
+  // );
 
-  console.log('🚀 | file: cacheflow.js | line 338 | smartCache | value', value);
+  // console.log('🚀 | file: cacheflow.js | line 338 | smartCache | value', value);
 
-  console.log(
-    '🚀 | file: cacheflow.js | line 340 | smartCache | globalMetrics.totalNumberOfRequests',
-    globalMetrics.totalNumberOfRequests
-  );
+  // console.log(
+  //   '🚀 | file: cacheflow.js | line 340 | smartCache | globalMetrics.totalNumberOfRequests',
+  //   globalMetrics.totalNumberOfRequests
+  // );
 
-  console.log(
-    '🚀 | file: cacheflow.js | line 333 | smartCache | (THRESHOLD + value) / globalMetrics.totalNumberOfRequests',
-    (defaultThreshold + value) / globalMetrics.totalNumberOfRequests
-  );
+  // console.log(
+  //   '🚀 | file: cacheflow.js | line 333 | smartCache | (THRESHOLD + value) / globalMetrics.totalNumberOfRequests',
+  //   (defaultThreshold + value) / globalMetrics.totalNumberOfRequests
+  // );
 
   if (value > defaultThreshold * 0.97) {
-    console.log('smartcache true');
+    // console.log('smartcache true');
 
     globalMetrics.averageCacheThreshold =
       (defaultThreshold + value) /
@@ -363,7 +376,7 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
     fsWrite('globalMetrics.json', globalMetrics);
     return true;
   }
-  console.log('smartcache false');
+  // console.log('smartcache false');
   fsWrite('globalMetrics.json', globalMetrics);
   return false;
 };
@@ -623,16 +636,18 @@ function clean() {
     }
   }
 
-  client.info((req, res) => {
-    res.split('\n').map((line) => {
-      if (line.match(/used_memory:/)) {
-        parsedGlobalData.sizeOfDataRedis = parseInt(line.split(':')[1]);
-        parsedGlobalData.sizeOfDataLocal -= sizeOfDeletedDataLocal;
+  if (client) {
+    client.info((req, res) => {
+      res.split('\n').map((line) => {
+        if (line.match(/used_memory:/)) {
+          parsedGlobalData.sizeOfDataRedis = parseInt(line.split(':')[1]);
+          parsedGlobalData.sizeOfDataLocal -= sizeOfDeletedDataLocal;
 
-        fsWrite('globalMetrics.json', parsedGlobalData);
-      }
+          fsWrite('globalMetrics.json', parsedGlobalData);
+        }
+      });
     });
-  });
+  }
 
   fsWrite('localStorage.json', parsedData);
   fsWrite('localMetricsStorage.json', parsedLocalData);
