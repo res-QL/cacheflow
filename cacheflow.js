@@ -12,7 +12,6 @@ exports.testMsg = function () {
 };
 
 let client;
-exports.client;
 let globalLocalThreshold; // = 10
 
 /*
@@ -57,30 +56,20 @@ exports.initCache = async function (configObj) {
   }
 
   if (configObj.redis) {
-    client = createClient(configObj);
-  }
-
-  // client.on('error', (err) => {
-  //   throw new Error('ERROR CONNECTING TO REDIS');
-  // });
-
-  setInterval(() => {
-    clean();
-  }, configObj.local.checkExpire * 1000 || 10000);
-};
-
-exports.createClient = function (configObj) {
-  try {
-    let response = redis.createClient({
+    client = redis.createClient({
       host: configObj.redis.host,
       port: configObj.redis.port,
       password: configObj.redis.password,
     });
-    return response;
-  } catch (err) {
-    throw new Error(err);
-    return err;
+
+    client.on('error', (err) => {
+      throw new Error('ERROR CONNECTING TO REDIS');
+    });
   }
+
+  setInterval(() => {
+    clean();
+  }, configObj.local.checkExpire * 1000 || 10000);
 };
 
 /*
