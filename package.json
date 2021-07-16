@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "nodemon index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest cacheflowTest.js"
   },
   "keywords": [],
   "author": "",
@@ -15,5 +15,8 @@
     "graphql": "^15.5.1",
     "nodemon": "^2.0.7",
     "redis": "^3.1.2"
+  },
+  "devDependencies": {
+    "jest": "^27.0.6"
   }
 }

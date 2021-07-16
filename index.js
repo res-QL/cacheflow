@@ -112,31 +112,23 @@ const resolvers = {
   Query: {
     users(parent, args, ctx, info) {
       //make sure that info is the param name
-      return cache(
-        { location: 'local', maxAge: 60, smartCache: true },
-        info,
-        () => {
-          // let x = 0;
-          // while (x < 1000) {
-          //   console.log(x++);
-          // }
+      return cache({ location: 'local' }, info, () => {
+        // let x = 0;
+        // while (x < 1000) {
+        //   console.log(x++);
+        // }
 
-          return users;
-        }
-      );
+        return users;
+      });
     },
     food(parent, args, ctx, info) {
-      return cache(
-        { location: 'local', maxAge: 10, smartCache: true },
-        info,
-        () => {
-          // let x = 0;
-          // while (x < 1000) {
-          //   console.log(x++);
-          // }
-          return food;
-        }
-      );
+      return cache({ location: 'local' }, info, () => {
+        // let x = 0;
+        // while (x < 1000) {
+        //   console.log(x++);
+        // }
+        return food;
+      });
     },
     dogs(parent, args, ctx, info) {
       return cache(
@@ -152,12 +144,10 @@ const resolvers = {
   Mutation: {
     addUser(parent, args, ctx, info) {
       return cache(
-        { location: 'redis', maxAge: 10, mutate: 'users' },
+        { location: 'local', maxAge: 10, mutate: 'users' },
         info,
         () => {
-          console.log(info);
           users.push({ name: args.name, favoriteFood: args.favoriteFood });
-          console.log(users);
           return users;
         }
       );
