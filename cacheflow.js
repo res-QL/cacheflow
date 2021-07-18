@@ -2,6 +2,7 @@ const fs = require("fs");
 const redis = require("redis");
 const { promisify } = require("util");
 
+
 ////////////
 //add average uncached vs cached latency ion global metrics
 ////////////
@@ -13,6 +14,7 @@ TEST FUNCTION: testMsg(){}
 Test to make sure npm package is connected
 
 */
+
 
 exports.testMsg = function () {
   console.log("This is a test message from cacheflow");
