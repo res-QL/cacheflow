@@ -1,0 +1,1 @@
+{"totalNumberOfRequests":1,"averageNumberOfCalls":1,"numberOfUncachedRequests":1,"numberOfCachedRequests":0,"totalTimeSaved":1,"averageUncachedLatency":1,"averageCachedLatency":0,"totalUncachedElapsed":1,"totalCachedElapsed":0,"globalAverageCallSpan":null,"uniqueResolvers":1,"sizeOfDataRedis":693104,"sizeOfDataLocal":230,"averageSizeOfDataLocal":230,"averageCacheThreshold":0}
