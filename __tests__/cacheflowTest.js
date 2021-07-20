@@ -75,11 +75,6 @@ describe('cacheflowql', () => {
         'utf-8'
       );
 
-      // await setTimeout(() => {
-      //   let localStorage2 = fs.readFileSync('localStorage.json', 'utf-8');
-      //   expect(localStorage).not.toBe(localStorage2);
-      // }, 3000);
-
       expect(localStorage).toBe(localStorageAfterClean);
       expect(localStorage).not.toBe(localStorageWithData);
     });
@@ -191,25 +186,3 @@ describe('cacheflowql', () => {
     });
   });
 });
-
-// fs.writeFileSync('localMetricsStorage.json', '{}');
-// fs.writeFileSync(
-//   'globalMetrics.json',
-//   JSON.stringify({
-//     totalNumberOfRequests: 0,
-//     averageNumberOfCalls: 0,
-//     numberOfUncachedRequests: 0,
-//     numberOfCachedRequests: 0,
-//     totalTimeSaved: 0,
-//     averageUncachedLatency: 0,
-//     averageCachedLatency: 0,
-//     totalUncachedElapsed: 0,
-//     totalCachedElapsed: 0,
-//     globalAverageCallSpan: 0,
-//     uniqueResolvers: 0,
-//     sizeOfDataRedis: 0,
-//     sizeOfDataLocal: 0,
-//     averageSizeOfDataLocal: 0,
-//     averageCacheThreshold: 0,
-//   })
-// );

@@ -1,7 +1,6 @@
-const fs = require("fs");
-const redis = require("redis");
-const { promisify } = require("util");
-
+const fs = require('fs');
+const redis = require('redis');
+const { promisify } = require('util');
 
 ////////////
 //add average uncached vs cached latency ion global metrics
@@ -15,10 +14,9 @@ Test to make sure npm package is connected
 
 */
 
-
-exports.testMsg = function () {
-  console.log("This is a test message from cacheflow");
-  return "This is a test message from cacheflow";
+exports.cacheflowTestMsg = function () {
+  console.log('This is a test message from cacheflow');
+  return 'This is a test message from cacheflow';
 };
 
 /*
@@ -62,9 +60,12 @@ Data cleaning interval is initialized
 */
 
 exports.initCache = async function (configObj) {
-  fs.writeFileSync("localMetricsStorage.json", "{}");
+  if (!fs.existsSync('cacheflowSrc')) {
+    fs.mkdirSync('cacheflowSrc');
+  }
+  fs.writeFileSync('cacheflowSrc/localMetricsStorage.json', '{}');
   fs.writeFileSync(
-    "globalMetrics.json",
+    'cacheflowSrc/globalMetrics.json',
     JSON.stringify({
       totalNumberOfRequests: 0,
       averageNumberOfCalls: 0,
@@ -85,7 +86,7 @@ exports.initCache = async function (configObj) {
   );
 
   if (configObj.local) {
-    fs.writeFileSync(`localStorage.json`, "{}");
+    fs.writeFileSync(`cacheflowSrc/localStorage.json`, '{}');
     globalLocalThreshold = configObj.local.globalThreshold / 1000;
   }
 
@@ -96,8 +97,8 @@ exports.initCache = async function (configObj) {
       password: configObj.redis.password,
     });
 
-    client.on("error", (err) => {
-      throw new Error("ERROR CONNECTING TO REDIS");
+    client.on('error', (err) => {
+      throw new Error('ERROR CONNECTING TO REDIS');
     });
   }
 
@@ -116,12 +117,12 @@ If cacheConfig.location is redis call cacheRedis
 
 exports.cache = function (cacheConfig = {}, info, callback) {
   const startDate = Date.now();
-  if (typeof cacheConfig !== "object" || Array.isArray(cacheConfig))
-    throw new Error("Config object is invalid");
-  if (cacheConfig.location === "local") {
+  if (typeof cacheConfig !== 'object' || Array.isArray(cacheConfig))
+    throw new Error('Config object is invalid');
+  if (cacheConfig.location === 'local') {
     return cacheLocal(cacheConfig, info, callback, startDate);
   }
-  if (cacheConfig.location === "redis") {
+  if (cacheConfig.location === 'redis') {
     return cacheRedis(cacheConfig, info, callback, startDate);
   }
 };
@@ -135,14 +136,14 @@ If resolver was not in local cache call localNotFound
 */
 
 async function cacheLocal(cacheConfig, info, callback, startDate) {
-  const metrics = fsRead("localMetricsStorage.json");
+  const metrics = fsRead('cacheflowSrc/localMetricsStorage.json');
   if (cacheConfig.mutate) {
     if (!metrics[cacheConfig.mutate]) {
-      throw new Error("Data does not exist in local cache");
+      throw new Error('Data does not exist in local cache');
     }
     return mutateLocal(cacheConfig, callback);
   }
-  const parsedData = fsRead("localStorage.json");
+  const parsedData = fsRead('cacheflowSrc/localStorage.json');
   if (parsedData[info.path.key]) {
     return localFound(cacheConfig, info, startDate, parsedData);
   } else {
@@ -159,13 +160,13 @@ Return data from the callback
 */
 
 async function mutateLocal(cacheConfig, callback) {
-  const parsedData = fsRead("localStorage.json");
+  const parsedData = fsRead('cacheflowSrc/localStorage.json');
   const dataBack = await callback();
   parsedData[cacheConfig.mutate] = {
     data: dataBack,
     expire: Date.now() + cacheConfig.maxAge * 1000,
   };
-  fsWrite("localStorage.json", parsedData);
+  fsWrite('cacheflowSrc/localStorage.json', parsedData);
   mutationMetrics(cacheConfig.mutate, dataBack);
   return parsedData[cacheConfig.mutate].data;
 }
@@ -185,13 +186,13 @@ function localFound(cacheConfig, info, startDate, parsedData) {
   const requestLatencyCached = currentTime - startDate;
   parsedData[info.path.key].expire = currentTime + cacheConfig.maxAge * 1000;
   metrics({ cachedLatency: requestLatencyCached }, info);
-  const globalMetrics = fsRead("globalMetrics.json");
+  const globalMetrics = fsRead('cacheflowSrc/globalMetrics.json');
   globalMetrics.numberOfCachedRequests++;
   globalMetrics.totalCachedElapsed += requestLatencyCached;
   globalMetrics.averageCachedLatency =
     globalMetrics.totalCachedElapsed / globalMetrics.numberOfCachedRequests;
-  fsWrite("globalMetrics.json", globalMetrics);
-  fsWrite("localStorage.json", parsedData);
+  fsWrite('cacheflowSrc/globalMetrics.json', globalMetrics);
+  fsWrite('cacheflowSrc/localStorage.json', parsedData);
   return parsedData[info.path.key].data;
 }
 
@@ -222,7 +223,7 @@ async function localNotFound(
   const currentTime = Date.now();
   const requestLatencyUncached = currentTime - startDate;
 
-  let localMetrics = fsRead("localMetricsStorage.json");
+  let localMetrics = fsRead('cacheflowSrc/localMetricsStorage.json');
   let threshold;
   let inMetricCheck = false;
 
@@ -232,17 +233,17 @@ async function localNotFound(
       {
         uncachedLatency: requestLatencyUncached,
         returnData,
-        storedLocation: "local",
+        storedLocation: 'local',
       },
       info
     );
   }
 
-  localMetrics = fsRead("localMetricsStorage.json");
+  localMetrics = fsRead('cacheflowSrc/localMetricsStorage.json');
   cacheConfig.threshold
     ? (threshold = cacheConfig.threshold / 1000)
     : (threshold = globalLocalThreshold);
-  const globalMetrics = fsRead("globalMetrics.json");
+  const globalMetrics = fsRead('cacheflowSrc/globalMetrics.json');
 
   const allCalls = localMetrics[resolverName].allCalls;
   const numberCalls = localMetrics[resolverName].numberOfCalls;
@@ -264,8 +265,8 @@ async function localNotFound(
     };
     globalMetrics.numberOfCachedRequests++;
 
-    fsWrite("globalMetrics.json", globalMetrics);
-    fsWrite("localStorage.json", parsedData);
+    fsWrite('cacheflowSrc/globalMetrics.json', globalMetrics);
+    fsWrite('cacheflowSrc/localStorage.json', parsedData);
     return returnData;
   } else {
     if (inMetricCheck === false) {
@@ -273,20 +274,20 @@ async function localNotFound(
         {
           uncachedLatency: requestLatencyUncached,
           returnData,
-          storedLocation: "local",
+          storedLocation: 'local',
         },
         info
       );
     }
 
-    const globalMetrics = fsRead("globalMetrics.json");
+    const globalMetrics = fsRead('cacheflowSrc/globalMetrics.json');
     globalMetrics.numberOfUncachedRequests++;
     globalMetrics.totalUncachedElapsed += requestLatencyUncached;
     globalMetrics.averageUncachedLatency =
       globalMetrics.totalUncachedElapsed /
       globalMetrics.numberOfUncachedRequests;
 
-    fsWrite("globalMetrics.json", globalMetrics);
+    fsWrite('cacheflowSrc/globalMetrics.json', globalMetrics);
   }
   return returnData;
 }
@@ -315,7 +316,7 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
   // let numberCalls = metricsData[resolverName].numberOfCalls / 100;
 
   let temp;
-  metricsData[resolverName].averageCallSpan === "Insufficient Data"
+  metricsData[resolverName].averageCallSpan === 'Insufficient Data'
     ? (temp = 10000)
     : (temp = metricsData[resolverName].averageCallSpan);
   let callSpan = metricsData[resolverName].averageCallSpan;
@@ -336,11 +337,11 @@ const smartCache = (metricsData, globalMetrics, resolverName) => {
         : globalMetrics.totalNumberOfRequests);
 
     metricsData[resolverName].cacheThreshold = value;
-    fsWrite("localMetricsStorage.json", metricsData);
-    fsWrite("globalMetrics.json", globalMetrics);
+    fsWrite('cacheflowSrc/localMetricsStorage.json', metricsData);
+    fsWrite('cacheflowSrc/globalMetrics.json', globalMetrics);
     return true;
   }
-  fsWrite("globalMetrics.json", globalMetrics);
+  fsWrite('cacheflowSrc/globalMetrics.json', globalMetrics);
   return false;
 };
 
@@ -389,7 +390,7 @@ async function cacheRedis(cacheConfig, info, callback, startDate) {
       metrics(
         {
           uncachedLatency: responseTime,
-          storedLocation: "redis",
+          storedLocation: 'redis',
           returnData,
         },
         info
@@ -413,8 +414,8 @@ Update metrics about size of data size in global cache after a mutation
 */
 
 function mutationMetrics(mutateName, data) {
-  const jsonLocal = fsRead("localMetricsStorage.json");
-  const jsonGlobal = fsRead("globalMetrics.json");
+  const jsonLocal = fsRead('cacheflowSrc/localMetricsStorage.json');
+  const jsonGlobal = fsRead('cacheflowSrc/globalMetrics.json');
 
   const oldSize = jsonLocal[mutateName].dataSize;
   const newSize = sizeOf(data);
@@ -423,8 +424,8 @@ function mutationMetrics(mutateName, data) {
 
   jsonGlobal.sizeOfDataLocal += newSize - oldSize;
 
-  fsWrite("localMetricsStorage.json", jsonLocal);
-  fsWrite("globalMetrics.json", jsonGlobal);
+  fsWrite('cacheflowSrc/localMetricsStorage.json', jsonLocal);
+  fsWrite('cacheflowSrc/globalMetrics.json', jsonGlobal);
 }
 
 /*
@@ -436,7 +437,7 @@ Always call globalMetrics
 */
 
 async function metrics(resolverData, info) {
-  let parsedMetrics = fsRead("localMetricsStorage.json");
+  let parsedMetrics = fsRead('cacheflowSrc/localMetricsStorage.json');
 
   if (parsedMetrics[info.path.key]) {
     await localMetricsUpdate(resolverData, info, parsedMetrics);
@@ -462,25 +463,25 @@ storedLocation: where the data is stored
 */
 
 function setLocalMetric(resolverData, info, parsedMetrics) {
-  globalMetricsParsed = fsRead("globalMetrics.json");
+  globalMetricsParsed = fsRead('cacheflowSrc/globalMetrics.json');
   parsedMetrics[info.path.key] = {
     firstCall: Date.now(),
     allCalls: [Date.now()],
     numberOfCalls: 1,
-    averageCallSpan: "Insufficient Data",
+    averageCallSpan: 'Insufficient Data',
     uncachedCallTime: resolverData.uncachedLatency,
     cachedCallTime: null,
     dataSize: sizeOf(resolverData.returnData),
     storedLocation: resolverData.storedLocation,
     cacheThreshold: null,
   };
-  fsWrite("localMetricsStorage.json", parsedMetrics);
+  fsWrite('cacheflowSrc/localMetricsStorage.json', parsedMetrics);
 
-  resolverData.storedLocation === "local"
+  resolverData.storedLocation === 'local'
     ? (globalMetricsParsed.sizeOfDataLocal += sizeOf(resolverData.returnData))
     : null;
 
-  fsWrite("globalMetrics.json", globalMetricsParsed);
+  fsWrite('cacheflowSrc/globalMetrics.json', globalMetricsParsed);
 }
 
 /*
@@ -509,7 +510,7 @@ function localMetricsUpdate(resolverData, info, parsedMetrics) {
   parsedMetrics[resolverName].numberOfCalls += 1;
   parsedMetrics[resolverName].cachedCallTime = resolverData.cachedLatency;
 
-  fsWrite("localMetricsStorage.json", parsedMetrics);
+  fsWrite('cacheflowSrc/localMetricsStorage.json', parsedMetrics);
 }
 
 /*
@@ -523,7 +524,7 @@ Updates amount of data saved locally
 function globalMetrics(resolverData, info, parsedMetrics) {
   const resolverName = info.path.key;
   const numOfResolvers = Object.keys(parsedMetrics).length;
-  let globalMetricsParsed = fsRead("globalMetrics.json");
+  let globalMetricsParsed = fsRead('cacheflowSrc/globalMetrics.json');
 
   globalMetricsParsed.totalNumberOfRequests++;
 
@@ -546,7 +547,7 @@ function globalMetrics(resolverData, info, parsedMetrics) {
   globalMetricsParsed.globalAverageCallSpan =
     globalAvgCallSpan / globalMetricsParsed.uniqueResolvers;
 
-  fsWrite("globalMetrics.json", globalMetricsParsed);
+  fsWrite('cacheflowSrc/globalMetrics.json', globalMetricsParsed);
 }
 
 /*
@@ -559,9 +560,9 @@ Updates local metrics for that resolver and global metrics
 function clean() {
   const dateNow = Date.now();
 
-  let parsedData = fsRead("localStorage.json");
-  let parsedGlobalData = fsRead("globalMetrics.json");
-  let parsedLocalData = fsRead("localMetricsStorage.json");
+  let parsedData = fsRead('cacheflowSrc/localStorage.json');
+  let parsedGlobalData = fsRead('cacheflowSrc/globalMetrics.json');
+  let parsedLocalData = fsRead('cacheflowSrc/localMetricsStorage.json');
 
   let sizeOfDeletedDataLocal = 0;
 
@@ -575,19 +576,19 @@ function clean() {
 
   if (client) {
     client.info((req, res) => {
-      res.split("\n").map((line) => {
+      res.split('\n').map((line) => {
         if (line.match(/used_memory:/)) {
-          parsedGlobalData.sizeOfDataRedis = parseInt(line.split(":")[1]);
+          parsedGlobalData.sizeOfDataRedis = parseInt(line.split(':')[1]);
           parsedGlobalData.sizeOfDataLocal -= sizeOfDeletedDataLocal;
 
-          fsWrite("globalMetrics.json", parsedGlobalData);
+          fsWrite('cacheflowSrc/globalMetrics.json', parsedGlobalData);
         }
       });
     });
   }
 
-  fsWrite("localStorage.json", parsedData);
-  fsWrite("localMetricsStorage.json", parsedLocalData);
+  fsWrite('cacheflowSrc/localStorage.json', parsedData);
+  fsWrite('cacheflowSrc/localMetricsStorage.json', parsedLocalData);
 }
 
 /*
@@ -598,7 +599,7 @@ fsWrite(){}
 */
 
 function fsRead(fileName) {
-  const data = fs.readFileSync(`${fileName}`, "utf-8");
+  const data = fs.readFileSync(`${fileName}`, 'utf-8');
   const json = JSON.parse(data);
   return json;
 }
